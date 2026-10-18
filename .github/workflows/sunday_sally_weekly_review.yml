@@ -1,0 +1,81 @@
+name: Selling Sally Weekly Review
+
+on:
+  workflow_dispatch:
+jobs:
+  sunday_sally_weekly_review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TZ: Asia/Singapore
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The value wedge reads past buy/sell multiples from git history.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r sunday-sally/requirements.txt
+          # Playwright is the stage-2 fallback for ASX announcement fetches
+          # (asx_fetch.py, via wally.asx_news) when the direct HTTP path is
+          # blocked for runner IPs.
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run Selling Sally
+        working-directory: sunday-sally
+        env:
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Half-price Message Batches on automatic runs; a manual run goes direct
+          # so you get the answer straight away. Never fewer answers: anything the
+          # batch doesn't return within LLM_BATCH_MAX_WAIT_MIN is sent direct.
+          LLM_BATCH: ${{ github.event_name == 'workflow_dispatch' && '0' || '1' }}
+          LLM_BATCH_MAX_WAIT_MIN: "30"
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          SALLY_CONFIG_PATH: config/settings.yaml
+        run: |
+          python -m src.main
+
+      # Sally's flags become questions Theo will not drop. Theo only *reads*
+      # docs/data/sally.json — Sally is not modified and does not know Theo
+      # exists. continue-on-error because a bug in Theo must never take down
+      # a working agent's weekly run.
+      - name: Ask Theo what Sally's flags mean for the theses
+        continue-on-error: true
+        run: |
+          pip install pyyaml jinja2 openpyxl
+          python -m theo.cli dashboard
+          echo "----- open questions -----"
+          python -m theo.cli signals || true
+
+      - name: Commit dashboard update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Commit only Sally's data JSON — no conflict possible with other agents
+          git add docs/data/sally.json docs/data/theo.json config/ticker_archetypes.yaml
+          git diff --staged --quiet || git commit -m "Sally data [skip ci]"
+          # Pull other agents' latest JSON files
+          git pull --rebase origin HEAD
+          # Rebuild HTML with all agents' combined data, then push
+          python scripts/build_dashboard.py
+          git add docs/index.html
+          git diff --staged --quiet || git commit -m "Dashboard update — Sally [skip ci]"
+          git push origin HEAD

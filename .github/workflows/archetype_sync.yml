@@ -1,0 +1,54 @@
+name: Archetype sync
+
+# Runs on any change to a watchlist, so a new ticker is classified straight
+# away rather than at the next weekly Wally run. Manual dispatch with
+# review=true also builds outputs/archetype_review.xlsx and emails it.
+on:
+  workflow_dispatch:
+    inputs:
+      review:
+        description: "Also build outputs/archetype_review.xlsx and email it"
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install PyYAML requests pandas numpy openpyxl
+
+      - name: Sync archetypes
+        if: ${{ !inputs.review }}
+        env:
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+        run: python -c "from shared.archetype_sync import sync_archetypes; sync_archetypes()"
+
+      - name: Sync and build review workbook
+        if: ${{ inputs.review }}
+        env:
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: python scripts/archetype_review.py
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add config/ticker_archetypes.yaml
+          git add -f outputs/archetype_review.xlsx || true
+          git diff --staged --quiet || git commit -m "Archetype sync [skip ci]"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push origin HEAD:"${GITHUB_REF_NAME}"

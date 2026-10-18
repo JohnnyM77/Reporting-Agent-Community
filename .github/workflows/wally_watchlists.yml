@@ -1,0 +1,78 @@
+name: Wally Watchlist Screening
+
+on:
+  workflow_dispatch:
+jobs:
+  wally:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-wally.txt
+          # Playwright is the stage-2 fallback for ASX announcement fetches
+          # (asx_fetch.py) when the direct HTTP path is blocked for runner IPs.
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run all watchlists with combined email
+        env:
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Half-price Message Batches on automatic runs; a manual run goes direct
+          # so you get the answer straight away. Never fewer answers: anything the
+          # batch doesn't return within LLM_BATCH_MAX_WAIT_MIN is sent direct.
+          LLM_BATCH: ${{ github.event_name == 'workflow_dispatch' && '0' || '1' }}
+          LLM_BATCH_MAX_WAIT_MIN: "30"
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger: run all with combined email (force TII75)
+            python -m wally.main --all-combined --force
+          else
+            # Scheduled run (weekly, Fri UTC): all watchlists including TII75
+            python -m wally.main --all-combined
+          fi
+
+      - name: Commit fundamentals cache
+        if: always()
+        run: |
+          git config user.name "Wally Bot"
+          git config user.email "wally-bot@reporting-agent.local"
+          git add fundamentals/ config/ticker_archetypes.yaml || true
+          git diff --staged --quiet || git commit -m "chore(fundamentals): update cache [$(date -u +%Y-%m-%d)]"
+          git push || echo "Nothing to push"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit dashboard update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Commit only Wally's data JSON — no conflict possible with other agents
+          git add docs/data/wally.json
+          git diff --staged --quiet || git commit -m "Wally data [skip ci]"
+          # Pull other agents' latest JSON files
+          git pull --rebase origin HEAD
+          # Rebuild HTML with all agents' combined data, then push
+          python scripts/build_dashboard.py
+          git add docs/index.html
+          git diff --staged --quiet || git commit -m "Dashboard update — Wally [skip ci]"
+          git push origin HEAD

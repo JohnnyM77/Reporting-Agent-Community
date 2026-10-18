@@ -1,0 +1,109 @@
+# Valuation archetypes: the single source of truth for every buy multiple.
+#
+# Nothing else in the repo may hard-code a buy P/E. Code reads this file via
+# shared/classifier.py. Plain-English explanation: docs/VALUATION_RULES.md.
+# Per-ticker calls (archetype, override, structural_headwind) live in
+# config/ticker_archetypes.yaml and are made by the owner, not by code.
+
+version: 1
+
+archetypes:
+  compounder:
+    label: Compounder
+    base_multiple: 25
+    eps_basis: ttm
+    description: Wide moat, ROIC above 20%, long reinvestment runway.
+  quality_steady:
+    label: Quality steady
+    base_multiple: 18
+    eps_basis: ttm
+    description: Has a moat; mid-single to low-double-digit growth.
+  defensive_mature:
+    label: Defensive mature
+    base_multiple: 15
+    eps_basis: avg_3y
+    description: Low growth, regulated, staples, healthcare services.
+  cyclical:
+    label: Cyclical
+    base_multiple: 10
+    eps_basis: avg_7y
+    description: Miners, energy, commodity-linked. Mid-cycle EPS, never peak EPS.
+  financial:
+    label: Financial
+    base_multiple: 12
+    eps_basis: ttm
+    cross_check: price_to_book
+    description: Banks, insurers, diversified financials. P/B shown as a cross-check.
+  property_infra:
+    label: Property / infrastructure
+    base_multiple: null          # no P/E line
+    eps_basis: none
+    alt_metric: dividend_yield   # dividend yield / P/AFFO
+    description: REITs, toll roads, utilities.
+  early_growth:
+    label: Early growth
+    base_multiple: null          # no P/E line
+    eps_basis: none
+    alt_metric: price_to_sales   # P/S or P/FCF
+    description: Pre-profit or erratic earnings.
+
+# How each EPS basis is computed (see shared/classifier.py).
+eps_bases:
+  ttm: {label: "TTM EPS"}
+  avg_3y: {label: "3yr avg EPS", years: 3}
+  avg_7y: {label: "7yr avg EPS (mid-cycle)", years: 7}
+  none: {label: "no P/E line"}
+
+# Modifiers: each moves the base multiple by +/- step. Applied to P/E archetypes only.
+modifiers:
+  step: 2
+  roic_high: 0.20            # ROIC above this: +step
+  roic_low: 0.08             # ROIC below this: -step
+  net_cash: true             # net cash: +step
+  net_debt_to_ebitda_max: 2.5  # net debt above this x EBITDA: -step
+  stability_years: 10        # no loss year in this many years AND low EPS volatility: +step
+  eps_yoy_stdev_max: 0.30    # "low volatility": stdev of log year-on-year EPS change at or below this
+  loss_year_penalty: true    # any loss year in stability_years: -step
+  structural_headwind: true  # set per ticker by the owner: -step
+  # Not meaningful for these archetypes (a bank's "net debt" is its deposits).
+  skip_for:
+    financial: [roic, net_debt]
+
+# SELL multiple for a value wedge with no hand-set SELL (Sally's automatic
+# configs, Oct 2026): the stock's own 10-year median P/E, but at least
+# over_buy_min x BUY and at most over_buy_max x BUY. A valuation YAML with its
+# own sell_multiple always wins. Not a buy multiple: the rules above still own
+# those.
+sell:
+  over_buy_min: 1.5
+  over_buy_max: 3.0
+  use_own_median_pe: true
+
+guardrails:
+  floor: 6
+  ceiling: 35
+  cap_at_own_median_pe: true   # never above the stock's own median P/E ...
+  median_years: 10             # ... over this many years (EODHD prices / statutory EPS)
+  override_wins: true          # a ticker override (multiple + reason) skips every guardrail
+
+# Auto-classifier (suggestion only; the owner confirms).
+classifier:
+  # Sector rules come first. Matched case-insensitively as substrings of GICS
+  # sector / group / industry (falling back to EODHD's own Sector / Industry).
+  sector_rules:
+    cyclical:
+      sectors: [materials, energy, basic materials]
+    financial:
+      sectors: [financials, financial services]
+    property_infra:
+      sectors: [real estate, utilities]
+      industries: [transportation infrastructure, airport, highway, toll road, marine ports]
+  # Inside a sector rule, these industries are a weaker fit; confidence is cut.
+  low_confidence_industries:
+    financial: [capital markets, financial exchanges, transaction & payment, data provider, asset management]
+    property_infra: [real estate management, real estate development, real estate services]
+  # Then quality metrics for everything else.
+  compounder: {roic_min: 0.20, revenue_cagr_min: 0.08, max_loss_years_in_5: 0}
+  quality_steady: {roic_min: 0.10, revenue_cagr_min: 0.04}
+  defensive_sectors: [consumer staples, health care, communication services, consumer defensive, healthcare]
+  borderline_margin: 0.15      # a metric within 15% of a threshold cuts confidence

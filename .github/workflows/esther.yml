@@ -1,0 +1,97 @@
+name: Esther the Wrestler
+
+# Simply Wall St Narrative + valuation editor. Manual only: JM picks the
+# companies and the mode (the spec's buttons), Esther reads Bob / Wally /
+# Sally / Harry / Theo output already in the repo, researches the latest
+# disclosures (web search), and emails the result the same way the other
+# agents do.
+#
+# Previous runs (for "what changed since last time") go to the private repo
+# when HINDSIGHT_PRIVATE_REPO_TOKEN is set, otherwise they are thrown away
+# with the runner. Nothing personal is committed to this public repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "Comma separated, e.g. CPU,BXB,BHP,NHC"
+        required: true
+        default: "CPU,BXB,BHP,NHC"
+      mode:
+        description: "full = narrative, quick = short update, valuation = change valuation, thesis = thesis check, challenge = CHALLENGE MY THESIS"
+        type: choice
+        options: [full, quick, valuation, thesis, challenge]
+        default: full
+      notes:
+        description: "Optional steer for Esther, e.g. 'focus on New Acland'"
+        required: false
+        default: ""
+      prices:
+        description: "Optional price overrides, e.g. BHP=59.80,NHC=6.10"
+        required: false
+        default: ""
+      sources:
+        description: "Optional ASX PDF links, e.g. NHC=https://...pdf|https://...pdf"
+        required: false
+        default: ""
+
+concurrency:
+  group: esther
+  cancel-in-progress: false
+
+jobs:
+  esther:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      HAS_PRIVATE_TOKEN: ${{ secrets.HINDSIGHT_PRIVATE_REPO_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyyaml anthropic pandas requests pypdf
+
+      - name: Check out private store (optional)
+        id: private
+        if: env.HAS_PRIVATE_TOKEN == 'true'
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: JohnnyM77/Reporting-Agent-private
+          token: ${{ secrets.HINDSIGHT_PRIVATE_REPO_TOKEN }}
+          path: esther_private
+
+      - name: Run Esther
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          ESTHER_MODEL: ${{ vars.ESTHER_MODEL || 'claude-opus-4-6' }}
+          ESTHER_STORE_DIR: ${{ github.workspace }}/esther_private/esther
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          TICKERS: ${{ inputs.tickers }}
+          MODE: ${{ inputs.mode }}
+          NOTES: ${{ inputs.notes }}
+          PRICES: ${{ inputs.prices }}
+          SOURCES: ${{ inputs.sources }}
+        run: |
+          args=(run --tickers "$TICKERS" --mode "$MODE" --notes "$NOTES")
+          [ -n "$PRICES" ] && args+=(--price "$PRICES")
+          [ -n "$SOURCES" ] && args+=(--source "$SOURCES")
+          python -m esther "${args[@]}"
+
+      - name: Keep Esther's run history (private repo only)
+        if: always() && steps.private.outcome == 'success'
+        run: |
+          cd esther_private
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A esther 2>/dev/null || true
+          git diff --staged --quiet || git commit -q -m "Esther run ${{ github.run_id }}"
+          git push -q

@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+import datetime as dt
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+LOW_THRESHOLD_PCT = float(os.environ.get("WALLY_LOW_THRESHOLD_PCT", "5.0"))
+
+# Multi-year lows: a ticker near its 52-week low is also checked against its
+# 2/3/5/10-year lows (same LOW_THRESHOLD_PCT band). 2 years = 104 weeks.
+MULTI_YEAR_HORIZONS: tuple[int, ...] = tuple(
+    sorted(int(x) for x in os.environ.get("WALLY_MULTI_YEAR_HORIZONS", "2,3,5,10").split(",") if x.strip())
+)
+
+# ASX news lookback for flagged tickers: how far back to scan announcements
+# and how many significant items to keep per ticker.
+NEWS_LOOKBACK_DAYS = int(os.environ.get("WALLY_NEWS_LOOKBACK_DAYS", "90"))
+NEWS_MAX_ITEMS = int(os.environ.get("WALLY_NEWS_MAX_ITEMS", "10"))
+
+
+def _load_excluded_etfs() -> frozenset[str]:
+    """Load the shared passive-ETF exclusion list from config/excluded_passive_etfs.yaml.
+
+    The path is resolved relative to the repository root (two levels above this
+    file: wally/ → repo root).  Returns an empty frozenset if the file is
+    missing so that Wally degrades gracefully in test environments.
+    """
+    candidate = Path(__file__).resolve().parents[1] / "config" / "excluded_passive_etfs.yaml"
+    if not candidate.exists():
+        return frozenset()
+    try:
+        data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
+        raw = data.get("excluded_tickers", [])
+        return frozenset(str(t).strip().upper() for t in raw if t)
+    except Exception:  # noqa: BLE001
+        return frozenset()
+
+
+# Passive ETFs that Wally must never screen or value.
+# Bob (announcements agent) does NOT use this exclusion set.
+WALLY_EXCLUDED_TICKERS: frozenset[str] = _load_excluded_etfs()
+
+# The watchlists live in watchlists/ — NOT .github/Watchlist/, which held an
+# older copy Wally read until 2026-08-29. The buy-price sync and the
+# TII -> JM -> Aussie Tech de-duplication were both written to watchlists/,
+# so Wally kept screening the March-2026 TII list with no target prices at
+# all: every run reported target_price=null and below_target=false, and the
+# whole below-target trigger was dead while looking completely healthy.
+# The stale copy has been deleted so there is only one place to edit.
+STANDARD_WATCHLISTS = [
+    "watchlists/income_watchlist.yaml",
+    "watchlists/jm_watchlist.yaml",
+    "watchlists/aussie_tech_watchlist.yaml",
+    "watchlists/tii_watchlist.yaml",
+    "watchlists/naptaker_watchlist.yaml",
+]
+TII75_WATCHLIST = "watchlists/tii75_watchlist.yaml"
+
+TII75_ANCHOR_ISO_WEEK = int(os.environ.get("TII75_ANCHOR_ISO_WEEK", "1"))
+
+
+@dataclass(frozen=True)
+class EmailSettings:
+    email_from: str
+    email_to: str
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_password: str
+
+
+@dataclass(frozen=True)
+class RunContext:
+    run_dt: dt.datetime
+    output_root: Path
+
+
+def now_utc() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def build_run_context() -> RunContext:
+    return RunContext(run_dt=now_utc(), output_root=Path("outputs") / now_utc().date().isoformat())
+
+
+def load_email_settings() -> EmailSettings:
+    # Reuse Bob's names where possible, with fallbacks. The env lookup itself
+    # lives in shared/email_service.py so every agent reads it the same way.
+    from shared.email_service import SmtpSettings
+
+    s = SmtpSettings.from_env()
+    missing = [
+        name
+        for name, value in {
+            "EMAIL_FROM or EMAIL_USER": s.email_from,
+            "EMAIL_TO": s.email_to,
+            "SMTP_USER or EMAIL_FROM": s.smtp_user,
+            "SMTP_PASS or EMAIL_APP_PASSWORD": s.smtp_password,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(f"Missing email settings: {', '.join(missing)}")
+
+    return EmailSettings(
+        email_from=s.email_from,
+        email_to=s.email_to,
+        smtp_host=s.smtp_host,
+        smtp_port=s.smtp_port,
+        smtp_user=s.smtp_user,
+        smtp_password=s.smtp_password,
+    )
+
+
+def should_run_tii75(today: dt.date, force: bool = False) -> bool:
+    return True

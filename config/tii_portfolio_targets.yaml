@@ -1,0 +1,9 @@
+# Example only. The original file held buy/sell ranges from a paid research
+# subscription, so it is not shipped. Same format as config/jm_portfolio_targets.yaml.
+holdings:
+  - ticker: XYZ.AX
+    company: Example Holdings Limited
+    buy_below: 10
+    sell_above: 20
+    max_weight: 0.05
+    currency: AUD

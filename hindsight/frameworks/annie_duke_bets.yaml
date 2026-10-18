@@ -1,0 +1,86 @@
+# Annie Duke's framework from "Thinking in Bets"
+# Questions to ask when documenting a thesis, to separate decision quality from outcome.
+# Revisit these a year or two later to evaluate whether you made a good decision,
+# even if the outcome turned out different than expected.
+#
+# These are captured at thesis-creation time and live in the thesis frontmatter.
+# Later, Harry and other reviewers can ask: "Was this a good bet at the time,
+# regardless of what happened?"
+
+questions:
+  - id: bet_framing
+    category: "Bet Framing"
+    question: "Am I thinking about this as a bet or as a certainty? What is the bet I'm actually making?"
+    rationale: "Certainty thinking leads to overconfidence. Naming the bet makes it testable later."
+    capture_as: "bet_statement"
+    example: "BET: That ASX will grow earnings at 3-5% CAGR over 5 years due to volume growth and cost leverage."
+
+  - id: conviction_calibration
+    category: "Conviction Calibration"
+    question: "How confident am I in this bet? Give a percentage (0-100%), and what would it take to shift that?"
+    rationale: "Miscalibrated confidence hides. A 30% conviction should not drive the same position size as an 80% conviction."
+    capture_as: "conviction_pct_initial"
+    example: "65% confident. Would drop to 30% if FY27 earnings guidance misses by >10%, or to 80% if volume accelerates."
+
+  - id: bull_vs_base_case
+    category: "Decision Quality"
+    question: "What is your base case, and what is the bull case? What is the bear case? Which one are you actually pricing in?"
+    rationale: "Easy to say you're buying the base case while thinking about the bull case. Name all three so you can check later."
+    capture_as: "cases_documented"
+    example: "Base: 3% earnings growth, $2.20 EPS, P/E stays at 18x → $39.60. Bull: 5% growth, volume inflection → $45. Bear: recession, earnings -5%, compression to 16x → $29."
+
+  - id: premortem
+    category: "Risk Framing"
+    question: "It's two years from now and this investment has gone badly. What happened? What was the key thing you got wrong?"
+    rationale: "Pre-mortems surface risks you're not thinking about because they're not in the news today."
+    capture_as: "premortem_statement"
+    example: "Market decides the business is in structural decline. One year of earnings misses and the multiple compresses from 18x to 12x."
+
+  - id: information_gaps
+    category: "Information Quality"
+    question: "What is the most important thing you don't know? What would it take to know it?"
+    rationale: "Knowing what you don't know is where convictions live. Secret intelligence that competitors don't have is rare."
+    capture_as: "key_unknown"
+    example: "Don't know if management will actually reinvest FCF or return it. Will find out at FY27 earnings."
+
+  - id: group_thinking
+    category: "Group Thinking"
+    question: "Who else holds this? Is this a crowded trade? Would you still own this if nobody you respect owned it?"
+    rationale: "Crowd comfort looks like conviction. It isn't."
+    capture_as: "crowd_check"
+    example: "Held by Berkshire, Platinum Asset, and TFS (my own model portfolio). Yes, I'd still own it on fundamentals alone."
+
+  - id: emotion_check
+    category: "Emotional Honesty"
+    question: "Are you buying because you like the story, or because the numbers are compelling? Be honest."
+    rationale: "Liking a stock and analyzing one are different. Liking bias #2 (Munger) lives here."
+    capture_as: "emotion_check_note"
+    example: "I like the CEO, but the numbers work without liking him. Convinced on ROIC >15%, not on personality."
+
+  - id: bet_sizing
+    category: "Position Sizing"
+    question: "Given your conviction and the risk/reward, is the position size appropriate? Too big? Too small?"
+    rationale: "A 65% conviction should not be sized like a 95% conviction."
+    capture_as: "sizing_check"
+    example: "2.5% position for a 65% conviction and a 2:1 upside/downside ratio feels right. Would be 4% if conviction were 80%."
+
+  - id: update_rules
+    category: "Decision Rules"
+    question: "When would you sell? What price? What news? What earnings miss? Make it concrete so future-you can't move the goalposts."
+    rationale: "Vague sell rules get rewritten every quarter. Concrete ones protect against emotional drift."
+    capture_as: "sell_triggers"
+    example: "SELL if: (a) FY27 EPS <$2.05 (two misses in a row), or (b) price >$50 (80% to bull case), or (c) FCF turns negative."
+
+  - id: time_horizon
+    category: "Time Horizon"
+    question: "What is your time horizon for this bet? When do you expect the thesis to play out?"
+    rationale: "A 3-year thesis is not a 10-year thesis. Knowing when lets you grade yourself on schedule."
+    capture_as: "thesis_horizon_years"
+    example: "3-5 year horizon. Expect valuation and earnings leverage to show up in next two earnings seasons."
+
+  - id: alternatives_rejected
+    category: "Opportunity Cost"
+    question: "What else could you buy with this capital? Why did you choose this instead?"
+    rationale: "Saying yes to one thing is saying no to another. Know which one and why."
+    capture_as: "rejected_alternative"
+    example: "Considered TPG (higher dividend yield but slower growth). Chose ASX for growth+stability combo; TPG will stay on watchlist."

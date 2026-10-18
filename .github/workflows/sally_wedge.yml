@@ -1,0 +1,73 @@
+name: Sally Wedge Check
+
+# On-demand Selling Sally for named tickers: no waiting for Sunday.
+# Draws the BUY/SELL value wedge, answers "where is the price in the wedge,
+# and did it get there on earnings or on the multiple?", runs Sally's full
+# analysis on every ticker given (trigger or not) and emails the result.
+# One-off: never writes docs/data/sally.json and never uploads to Drive.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "Ticker(s), comma or space separated, e.g. PWH or PWH, BXB (ASX assumed; RR.L etc. kept as given)"
+        required: true
+        default: "PWH"
+      start:
+        description: "Chart from: full (all history) | year_before_buy (a year before your first buy in the IRR ledger) | YYYY-MM-DD"
+        required: false
+        default: "full"
+
+jobs:
+  sally_wedge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TZ: Asia/Singapore
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the wedge reads past buy/sell multiples from the
+          # git history of valuations/<ticker>.yaml.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r sunday-sally/requirements.txt
+
+      - name: Run Sally on the named tickers
+        working-directory: sunday-sally
+        env:
+          SALLY_TICKERS: ${{ inputs.tickers }}
+          SALLY_WEDGE_START: ${{ inputs.start }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          SALLY_CONFIG_PATH: config/settings.yaml
+        run: |
+          python -m src.main
+
+      - name: Keep the charts and data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sally-wedge
+          path: |
+            sunday-sally/data/outputs/**/wedge_chart.png
+            sunday-sally/data/outputs/**/wedge_chart.svg
+            sunday-sally/data/outputs/**/value_wedge.xlsx
+            sunday-sally/data/outputs/**/wedge_points.csv
+            sunday-sally/data/outputs/**/wedge.json
+            sunday-sally/data/outputs/**/memo.md
+          if-no-files-found: warn

@@ -1,0 +1,70 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# LAU.AX — Lindsay Australia Limited  |  Value wedge config
+# Refrigerated road + rail freight (farm to port) and rural merchandise.
+# Held Jan 2024 - May 2026 (two buys, one exit: data/decisions.json, theses/LAU.md).
+# ──────────────────────────────────────────────────────────────────────────────
+
+ticker: LAU.AX
+company_name: Lindsay Australia Limited
+business: "Refrigerated road and rail freight, rural merchandise (horticulture-weighted)"
+exchange: ASX
+stock_type: value
+
+# BUY 10x / SELL 18x, fair ~12.4x (30% of the way up). Set Oct 2026 for this
+# chart, applied to the whole history: the thesis bought at ~10x, "roughly 50%
+# below its own decade average multiple excluding the COVID years" (~20x). SELL
+# sits below that average because the exit concluded the cheapness was a
+# correct read of low-margin economics, not a mispricing. Change freely.
+buy_multiple: 10
+sell_multiple: 18
+multiple_history:
+  - {date: "2016-08-29", buy_pe: 10, sell_pe: 18, reason: "LAU framework (set Oct 2026), applied to the whole history"}
+fair_split: 0.3
+
+price_data:
+  start_date: "2015-10-01"
+
+# ── EPS: statutory, from EODHD statements (no estimates) ─────────────────────
+# Annual EPS = income-statement NPAT / shares on issue at year end (the repo's
+# shared.eodhd.annual_eps method: both share counts checked). Each figure
+# applies from its release date: EODHD reportDate, else the ASX two-month
+# deadline (late is safe; early would be look-ahead). Half-years are NPAT for
+# the six months to December / shares at 31 Dec; the wedge rolls them into a
+# trailing-12-month figure at each February result. The Dec and Jun halves sum
+# to the reported year exactly (FY23: 16.82 + 17.70 = 34.52).
+eps_basis: reported_ttm
+earnings:
+  - {date: "2016-08-29", period: "FY2016", period_end: "2016-06-30", ttm_eps: 2.790, source: "EODHD income statement", notes: "Statutory NPAT $8.07m / 289.3m shares at year end; EODHD reportDate"}
+  - {date: "2017-08-25", period: "FY2017", period_end: "2017-06-30", ttm_eps: 2.207, source: "EODHD income statement", notes: "Statutory NPAT $6.43m / 291.2m shares at year end; EODHD reportDate"}
+  - {date: "2018-08-23", period: "FY2018", period_end: "2018-06-30", ttm_eps: 2.744, source: "EODHD income statement", notes: "Statutory NPAT $8.06m / 293.7m shares at year end; EODHD reportDate"}
+  - {date: "2019-08-23", period: "FY2019", period_end: "2019-06-30", ttm_eps: 2.994, source: "EODHD income statement", notes: "Statutory NPAT $8.88m / 296.6m shares at year end; EODHD reportDate"}
+  - {date: "2020-08-25", period: "FY2020", period_end: "2020-06-30", ttm_eps: 1.778, source: "EODHD income statement", notes: "Statutory NPAT $5.32m / 299.3m shares at year end; EODHD reportDate"}
+  - {date: "2021-08-23", period: "FY2021", period_end: "2021-06-30", ttm_eps: 0.418, source: "EODHD income statement", notes: "Statutory NPAT $1.25m / 300.1m shares at year end; EODHD reportDate"}
+  - {date: "2022-08-17", period: "FY2022", period_end: "2022-06-30", ttm_eps: 6.377, source: "EODHD income statement", notes: "Statutory NPAT $19.23m / 301.6m shares at year end; EODHD reportDate"}
+  - {date: "2023-08-30", period: "FY2023", period_end: "2023-06-30", ttm_eps: 11.391, source: "EODHD income statement", notes: "Statutory NPAT $34.52m / 303.0m shares at year end; ASX two-month deadline (late, never early)"}
+  - {date: "2024-08-30", period: "FY2024", period_end: "2024-06-30", ttm_eps: 8.695, source: "EODHD income statement", notes: "Statutory NPAT $27.27m / 313.6m shares at year end; ASX two-month deadline (late, never early)"}
+  - {date: "2025-08-20", period: "FY2025", period_end: "2025-06-30", ttm_eps: 5.482, source: "EODHD income statement", notes: "Statutory NPAT $17.39m / 317.2m shares at year end; EODHD reportDate"}
+  - {date: "2026-08-30", period: "FY2026", period_end: "2026-06-30", ttm_eps: 6.245, source: "EODHD income statement", notes: "Statutory NPAT $22.87m / 366.3m shares at year end; ASX two-month deadline (late, never early)"}
+
+half_year_eps:
+  - {period: "1H2016", period_end: "2015-12-31", release: "2016-02-29", eps: 1.900, source: "EODHD half-year income statement: NPAT $5.47m / 288.2m shares"}
+  - {period: "1H2017", period_end: "2016-12-31", release: "2017-02-23", eps: 2.045, source: "EODHD half-year income statement: NPAT $5.94m / 290.4m shares"}
+  - {period: "1H2018", period_end: "2017-12-31", release: "2018-02-23", eps: 1.712, source: "EODHD half-year income statement: NPAT $5.01m / 292.6m shares"}
+  - {period: "1H2019", period_end: "2018-12-31", release: "2019-02-22", eps: 1.831, source: "EODHD half-year income statement: NPAT $5.40m / 294.9m shares"}
+  - {period: "1H2020", period_end: "2019-12-31", release: "2020-02-21", eps: 1.943, source: "EODHD half-year income statement: NPAT $5.79m / 297.8m shares"}
+  - {period: "1H2021", period_end: "2020-12-31", release: "2021-02-23", eps: 2.175, source: "EODHD half-year income statement: NPAT $6.51m / 299.4m shares"}
+  - {period: "1H2022", period_end: "2021-12-31", release: "2022-02-21", eps: 4.074, source: "EODHD half-year income statement: NPAT $12.23m / 300.4m shares"}
+  - {period: "1H2023", period_end: "2022-12-31", release: "2023-02-21", eps: 5.562, source: "EODHD half-year income statement: NPAT $16.82m / 302.4m shares"}
+  - {period: "1H2024", period_end: "2023-12-31", release: "2024-02-26", eps: 5.843, source: "EODHD half-year income statement: NPAT $18.08m / 309.4m shares; release 26 Feb 2024 per theses/LAU.md"}
+  - {period: "1H2025", period_end: "2024-12-31", release: "2025-02-20", eps: 4.674, source: "EODHD half-year income statement: NPAT $14.65m / 313.6m shares"}
+  - {period: "1H2026", period_end: "2025-12-31", release: "2026-02-26", eps: 3.500, source: "EODHD half-year income statement: NPAT $12.94m / 369.6m shares; release 26 Feb 2026 per theses/LAU.md"}
+
+period_notes:
+  FY2021: "FY21: statutory NPAT $1.3m"
+  FY2022: "COVID freight boom: NPAT $19.2m"
+  FY2023: "Record year: NPAT $34.5m"
+  FY2025: "Weather-hit 2H25 ('washed away'): NPAT $17.4m"
+  1H2026: "HY26: revenue +25%, NPAT flat on more shares; exit 6 May 2026, thesis broken (P2)"
+  FY2026: "FY26: NPAT +32% to $22.9m on a larger share count"
+
+# The buys and the 6 May 2026 exit come from data/decisions.json (the ledger).

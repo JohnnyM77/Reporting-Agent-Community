@@ -1,0 +1,49 @@
+asx:
+  ABB: Aussie Broadband Limited
+  AHC: Austco Healthcare Limited
+  AR9: archTIS Limited
+  ATP: Atlas Pearls Limited
+  BHP: BHP Group Limited
+  BXB: Brambles Limited
+  CAT: Catapult Sports Ltd
+  CPU: Computershare Limited
+  CSL: CSL Limited
+  DRO: DroneShield Limited
+  IAG: Insurance Australia Group Limited
+  MSV: Mitchell Services Limited
+  MVP: Medical Developments International Limited
+  NHC: New Hope Corporation Limited
+  PWH: PWR Holdings Limited
+  RTH: RAS Technology Holdings Limited
+  TWE: Treasury Wine Estates Limited
+  VAS: Vanguard Australian Shares Index ETF
+  VEU: Vanguard All-World ex-US Shares Index ETF
+  VHY: Vanguard Australian Shares High Yield ETF
+  WDS: Woodside Energy Group Ltd
+
+lse:
+  RR.: Rolls-Royce Holdings plc
+
+# SGX codes (3-4 char native SGX codes, not Bloomberg tickers).
+# Fetched via sgx_fetch.py; requires the self-hosted Windows runner
+# (see sgx_fetch.py docstring for the reason).
+sgx:
+  D05: DBS Group Holdings Ltd
+  U11: United Overseas Bank Ltd
+  O39: Oversea-Chinese Banking Corporation Ltd
+  Z74: Singapore Telecommunications Ltd
+  C6L: Singapore Airlines Ltd
+
+# US (NYSE + NASDAQ) tickers. Fetched via us_fetch.py (SEC EDGAR).
+# The ASX morning run (daily.yml) iterates this list after ASX Bob has
+# finished, so every ticker here gets a SEC EDGAR quarterly-results
+# check as part of the same digest cycle. us_daily.yml is still there
+# for on-demand single-ticker dispatches.
+us:
+  RMD: ResMed Inc
+
+# ETFs (VAS, VEU, VHY) are included for ASX announcements but skipped for news scanning
+etf_tickers:
+  - VAS
+  - VEU
+  - VHY

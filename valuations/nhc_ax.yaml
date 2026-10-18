@@ -1,0 +1,104 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# NHC.AX — New Hope Corporation  |  Value Chart Config
+# Reference example for cyclical coal/commodity companies.
+# Template: outputs/NHC_ASX_Value_Analysis_v3.xlsx
+# ──────────────────────────────────────────────────────────────────────────────
+
+ticker: NHC.AX
+company_name: New Hope Corporation
+business: "Thermal coal mining — Bengalla (80%) & New Acland (100%)"
+exchange: ASX
+
+# ── Stock type controls which valuation framework and warnings are displayed ──
+# Options: "cyclical" | "quality" | "growth" | "income"
+stock_type: cyclical
+
+# ── Valuation inputs (yellow editable cells in Settings sheet) ────────────────
+buy_multiple: archetype     # from config/valuation_archetypes.yaml via shared/classifier.py (Oct 2026)
+sell_multiple: auto         # own 10-year median P/E, 1.5-3x BUY (sell rule, valuation_archetypes.yaml)
+rror: 0.05                # Required Rate of Return for Div/RRoR line (0.05 = 5%)
+norm_eps: 50              # Through-cycle normalised EPS (cents). Cyclicals only.
+                          # Set to null for quality/growth stocks.
+
+# ── Chart visual configuration ────────────────────────────────────────────────
+chart:
+  dimensions:
+    width: 34             # openpyxl chart width units
+    height: 20            # openpyxl chart height units
+
+  left_axis:              # PRIMARY left axis — Price only
+    label: "Price (AUD $)"
+    min: 0.0
+    max: 8.0              # Set to ~20% above expected peak price
+    major_unit: 1.0
+    num_fmt: '"$"#,##0.00'
+
+  right_axis:             # SECONDARY right axis — all value/P/E series
+    label: "P/E Ratio"
+    min: 0.0
+    max: 20.0             # Cap prevents old spike P/Es compressing current view
+    major_unit: 2.0
+    num_fmt: "0.0"
+
+  x_axis:
+    num_fmt: "MMM-YY"
+    tick_label_skip: 26   # With weekly data: 26 ≈ every 6 months. Use 13 for monthly.
+    tick_mark_skip: 26
+
+  lines:
+    price:
+      color: "1565C0"     # Blue — solid
+      width_emu: 9525     # ~0.75pt. Use weekly data for clean line; avoid >12700 with daily data.
+      style: solid
+    value_buy:
+      color: "1A5E20"     # Dark green — dashed
+      width_emu: 19050    # ~1.5pt
+      style: dash
+    value_sell:
+      color: "C0392B"     # Red-orange — dashed
+      width_emu: 19050
+      style: dash
+    div_rror:
+      color: "2E7D32"     # Lighter green — dashed
+      width_emu: 19050
+      style: dash
+    pe_smooth:
+      color: "B8860B"     # Olive/gold — solid
+      width_emu: 15875    # ~1.25pt
+      style: solid
+
+  pe_smooth_days: 60      # Rolling average window in calendar days.
+                          # With weekly price data this maps to window=12 weeks.
+
+  legend_position: "t"    # t=top, b=bottom, r=right, l=left
+  legend_overlay: true    # Overlays on chart plot area (saves space)
+
+  # Axis title box styling — injected via XML patch after save
+  axis_title_box:
+    fill: "FFFF00"        # Yellow fill
+    border_color: "000000" # Black border
+    border_width_emu: 9525  # ~0.75pt
+    text_bold: true
+    text_color: "000000"
+    font_size_pt: 9
+
+  # Legend box styling — injected via XML patch
+  legend_box:
+    fill: "FFFFFF"        # White fill
+    border_color: "404040" # Dark grey border
+    border_width_emu: 12700 # ~1pt
+
+# ── Price data settings ───────────────────────────────────────────────────────
+price_data:
+  frequency: weekly       # "weekly" (recommended, ~533 rows/10yr) or "daily" (~2600 rows/10yr)
+  resample_day: "W-FRI"   # pandas resample rule for weekly Friday close
+  start_date: "2016-01-01"
+  source_hint: "marketindex.com.au/asx/nhc — export daily CSV (Date as YYYYMMDD)"
+  stockhistory_formula: '=STOCKHISTORY("NHC.AX",DATE(2016,1,1),TODAY(),0,1,0,1)'
+
+# ── Earnings ─────────────────────────────────────────────────────────────────
+# Oct 2026: the hand-typed rows here were all "Est." (never verified), so they
+# were removed. EPS now comes from EODHD's reported statements at run time:
+# statutory NPAT / checked share count, each year from its release date
+# (shared/eps_history.py). Sally's wedge and Wally's value chart both read it.
+earnings_source: eodhd

@@ -1,0 +1,113 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# WDS.AX — Woodside Energy Group Limited  |  Value Chart Config
+# Australia's largest independent oil & gas company — LNG, oil, new energy.
+# Merged with BHP Petroleum in June 2022 (shares roughly doubled in count).
+# Classic cyclical: EPS tracks oil/LNG prices. Buy low multiples at commodity trough.
+# Reports in USD; EPS below in AUD cents at prevailing exchange rates.
+# ──────────────────────────────────────────────────────────────────────────────
+
+ticker: WDS.AX
+company_name: Woodside Energy Group
+business: "LNG producer — Pluto LNG, North West Shelf, Wheatstone; Sangomar (Senegal); Trion (Mexico); acquired BHP Petroleum FY2022"
+exchange: ASX
+
+stock_type: cyclical         # Oil & gas commodity cyclical — 'low P/E = cheap' is INVERTED at peak
+
+buy_multiple: 9             # Slow to buy: enter at trough/normalised earnings
+sell_multiple: 16          # JM Oct 2026: widened from 14x (too cheap given electricity demand)
+rror: 0.07                  # 7% — energy sector warrants higher return hurdle
+norm_eps: 200               # Through-cycle normalised EPS ~$2.00 (200 cents). Update as view evolves.
+
+chart:
+  dimensions:
+    width: 34
+    height: 20
+
+  left_axis:
+    label: "Price (AUD $)"
+    min: 0.0
+    max: 45.0             # WDS peaked ~$38 in 2022; $45 gives headroom
+    major_unit: 5.0
+    num_fmt: '"$"#,##0.00'
+
+  right_axis:
+    label: "P/E Ratio"
+    min: 0.0
+    max: 20.0             # Cap at 20x — cyclicals rarely go beyond this on real earnings
+    major_unit: 2.0
+    num_fmt: "0.0"
+
+  x_axis:
+    num_fmt: "MMM-YY"
+    tick_label_skip: 26
+    tick_mark_skip: 26
+
+  lines:
+    price:
+      color: "1565C0"
+      width_emu: 9525
+      style: solid
+    value_buy:
+      color: "1A5E20"
+      width_emu: 19050
+      style: dash
+    value_sell:
+      color: "C0392B"
+      width_emu: 19050
+      style: dash
+    div_rror:
+      color: "2E7D32"
+      width_emu: 19050
+      style: dash
+    pe_smooth:
+      color: "B8860B"
+      width_emu: 15875
+      style: solid
+
+  pe_smooth_days: 60
+  legend_position: "t"
+  legend_overlay: true
+  axis_title_box:
+    fill: "FFFF00"
+    border_color: "000000"
+    border_width_emu: 9525
+    text_bold: true
+    text_color: "000000"
+    font_size_pt: 9
+  legend_box:
+    fill: "FFFFFF"
+    border_color: "404040"
+    border_width_emu: 12700
+
+price_data:
+  frequency: weekly
+  resample_day: "W-FRI"
+  start_date: "2016-01-01"
+  source_hint: "marketindex.com.au/asx/wds — export daily CSV (Date as YYYYMMDD)"
+  stockhistory_formula: '=STOCKHISTORY("WDS.AX",DATE(2016,1,1),TODAY(),0,1,0,1)'
+
+# ── Earnings ─────────────────────────────────────────────────────────────────
+# Oct 2026: the hand-typed rows here were all "Est." (never verified), so they
+# were removed. EPS now comes from EODHD's reported statements at run time:
+# statutory NPAT / checked share count, each year from its release date
+# (shared/eps_history.py). Sally's wedge and Wally's value chart both read it.
+earnings_source: eodhd
+
+# Woodside is a cyclical: value it on smoothed (through-the-cycle) EPS, the
+# same 5-year window JM chose for BHP. The statutory corridor stays faint.
+# FY2015 and FY2020 are left out of every average: statutory EPS was crushed by
+# impairments (FY15 NPAT US$26m vs ~US$1.0bn underlying; FY20 a US$4.0bn loss
+# vs ~US$0.4bn underlying), the same treatment as BHP's FY16 Samarco year.
+# FY2022 is a gap: EODHD's two share counts disagree after the BHP Petroleum
+# merger (1,910m vs 1,524m), so the check leaves that year out.
+eps_smoothing:
+  years: 5
+  exclude: [FY2015, FY2020]
+  reason: "oil and gas EPS swings with the commodity cycle; FY15 and FY20 statutory EPS were impairment years"
+
+# BUY 9x is JM's own framework; SELL widened 14x -> 16x on 18 Oct 2026 because
+# the old range looked too cheap given the long-run demand for electricity
+# (gas for power). Dated, not back-dated: the corridor widens from that day.
+multiple_history:
+  - {date: "2015-01-01", buy_pe: 9, sell_pe: 14, reason: "JM's original Woodside framework"}
+  - {date: "2026-10-18", buy_pe: 9, sell_pe: 16, reason: "JM: SELL widened to 16x, electricity demand makes 14x too cheap"}

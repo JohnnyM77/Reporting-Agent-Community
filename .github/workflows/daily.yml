@@ -1,0 +1,104 @@
+name: Daily Announcement Digest
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_rerun_tickers:
+        description: "Comma-separated tickers to re-process even if already seen (also drops the 24h window). Example: BHP,CSL"
+        required: false
+        default: ""
+      manual_ticker:
+        description: "Optional: analyze tickers not in your portfolio (comma-separated, limited to last 7 days). Leave blank to skip. Example: PME,SPZ,COH"
+        required: false
+        default: ""
+      results_ticker:
+        description: "Optional: pull a ticker's LAST half/full-year results (looks back ~6 months) and run the full analysis. Comma-separated. Example: HPG"
+        required: false
+        default: ""
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore seen announcements state
+        uses: actions/cache/restore@v4
+        with:
+          path: state_seen.json
+          key: seen-state-${{ github.ref_name }}
+          restore-keys: |
+            seen-state-${{ github.ref_name }}-
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 pyyaml pypdf anthropic google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib playwright weasyprint
+          playwright install chromium --with-deps
+
+      - name: Run agent
+        env:
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: claude-sonnet-4-6
+          # Reporting season: several portfolio names can report on the same
+          # morning, and each results item costs one structured call.
+          MAX_LLM_CALLS: "25"
+          # The results structured call returns metrics JSON plus an ~11
+          # section markdown analysis; large reporters (BHP, CSL) blow past
+          # the shared 4096 default and truncate mid-JSON. Sized so no real
+          # results announcement can be cut off.
+          CLAUDE_RESULTS_MAX_TOKENS: "50000"
+          # Drive auth: OAuth is preferred and required on personal Gmail —
+          # a service account has no storage quota of its own, so writes to
+          # a plain My Drive folder fail with 403 even when the folder is
+          # shared with the service account. See drive_service() and the
+          # architecture note in CLAUDE.md.
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          BROTHER_EMAIL: ${{ secrets.BROTHER_EMAIL }}
+          SEEN_STATE_PATH: state_seen.json
+          FORCE_RERUN_TICKERS: ${{ inputs.force_rerun_tickers }}
+          MANUAL_TICKER: ${{ inputs.manual_ticker }}
+          RESULTS_TICKER: ${{ inputs.results_ticker }}
+          # Capital/debt-raise cards pull the company's latest reported balance
+          # sheet from EODHD (fetch_debt_profile) for the prior-leverage
+          # baseline. Best-effort — the card renders without it if unset.
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          # Lets main() gate the catch-up schedule without also gating a
+          # manual dispatch, which must always run.
+          RUN_TRIGGER: ${{ github.event_name }}
+        run: |
+          python agent.py
+
+      - name: Commit dashboard update
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/bob.json
+          git diff --staged --quiet || git commit -m "Bob data [skip ci]"
+          git pull --rebase origin HEAD
+          python scripts/build_dashboard.py
+          git add docs/index.html docs/data/bob_history.json
+          git diff --staged --quiet || git commit -m "Dashboard update — Bob [skip ci]"
+          git push origin HEAD
+
+      - name: Save seen announcements state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state_seen.json
+          key: seen-state-${{ github.ref_name }}-${{ github.run_id }}

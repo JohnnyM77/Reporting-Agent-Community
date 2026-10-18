@@ -1,0 +1,5 @@
+{
+ "as_at": "",
+ "note": "Empty in the community edition. Put your own money-free ledger here with scripts/export_ledger.py, or copy the format from data/decisions.example.json.",
+ "decisions": []
+}

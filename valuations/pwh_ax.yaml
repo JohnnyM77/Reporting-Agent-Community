@@ -1,0 +1,196 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# PWH.AX — PWR Holdings Limited  |  Value Chart Config
+# Niche manufacturer of high-performance cooling systems for motorsport, aerospace,
+# defence, and automotive OEM. F1, NASCAR, IndyCar, military vehicles.
+# Quality growth compounder — niche moat, recurring OEM relationships, expanding sectors.
+# ──────────────────────────────────────────────────────────────────────────────
+
+ticker: PWH.AX
+company_name: PWR Holdings Limited
+business: "High-performance cooling systems — Formula 1, NASCAR, IndyCar, military/defence, automotive OEM, aerospace"
+exchange: ASX
+
+stock_type: quality         # Quality niche growth — strong moat in high-performance cooling
+
+buy_multiple: 25            # JM, Oct 2026: cheap for a quality niche compounder (Sodhi: 23x FY27 "cheap")
+sell_multiple: 50           # JM, Oct 2026: fair ~34x is 35% of the way up; SELL well above value
+rror: 0.02                  # 2% — modest dividend; growth focus
+norm_eps: null              # Quality compounder — no cyclical mean-reversion
+
+chart:
+  dimensions:
+    width: 34
+    height: 20
+
+  left_axis:
+    label: "Price (AUD $)"
+    min: 0.0
+    max: 20.0             # PWH peaked ~$14-15 AUD; $20 gives ample headroom
+    major_unit: 2.0
+    num_fmt: '"$"#,##0.00'
+
+  right_axis:
+    label: "P/E Ratio"
+    min: 0.0
+    max: 55.0             # Quality growth can trade at elevated P/Es
+    major_unit: 5.0
+    num_fmt: "0.0"
+
+  x_axis:
+    num_fmt: "MMM-YY"
+    tick_label_skip: 26
+    tick_mark_skip: 26
+
+  lines:
+    price:
+      color: "1565C0"
+      width_emu: 9525
+      style: solid
+    value_buy:
+      color: "1A5E20"
+      width_emu: 19050
+      style: dash
+    value_sell:
+      color: "C0392B"
+      width_emu: 19050
+      style: dash
+    div_rror:
+      color: "2E7D32"
+      width_emu: 19050
+      style: dash
+    pe_smooth:
+      color: "B8860B"
+      width_emu: 15875
+      style: solid
+
+  pe_smooth_days: 60
+  legend_position: "t"
+  legend_overlay: true
+  axis_title_box:
+    fill: "FFFF00"
+    border_color: "000000"
+    border_width_emu: 9525
+    text_bold: true
+    text_color: "000000"
+    font_size_pt: 9
+  legend_box:
+    fill: "FFFFFF"
+    border_color: "404040"
+    border_width_emu: 12700
+
+price_data:
+  frequency: weekly
+  resample_day: "W-FRI"
+  start_date: "2016-01-01"
+  source_hint: "marketindex.com.au/asx/pwh — export daily CSV (Date as YYYYMMDD)"
+  stockhistory_formula: '=STOCKHISTORY("PWH.AX",DATE(2016,1,1),TODAY(),0,1,0,1)'
+
+# ── Earnings history ──────────────────────────────────────────────────────────
+# NO ESTIMATES. Every EPS figure here is reported, with its source.
+#
+# `earnings:` is GENERATED from the Simply Wall St export — do not hand-edit:
+#   cd sunday-sally && python -m src.sws_import <SWS_Data.xlsx> --ticker PWH --write
+# ttm_eps = reported annual (financial year to 30 June) EPS in AUD cents.
+# `date` = the day the market could know it; EPS never applies before it.
+# ttm_div = SWS payout ratio x EPS (used only by the old value-chart workbook).
+eps_basis: reported_ttm
+earnings:
+  - {date: "2016-08-25", period: "FY2016", period_end: "2016-06-30", ttm_eps: 9.306, ttm_div: 4.4, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2017-08-24", period: "FY2017", period_end: "2017-06-30", ttm_eps: 9.28, ttm_div: 5.6, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2018-08-23", period: "FY2018", period_end: "2018-06-30", ttm_eps: 11.001, ttm_div: 7.3, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2019-08-29", period: "FY2019", period_end: "2019-06-30", ttm_eps: 14.206, ttm_div: 8.5, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2020-08-20", period: "FY2020", period_end: "2020-06-30", ttm_eps: 13.041, ttm_div: 5.9, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2021-08-20", period: "FY2021", period_end: "2021-06-30", ttm_eps: 16.77, ttm_div: 8.8, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2022-08-19", period: "FY2022", period_end: "2022-06-30", ttm_eps: 20.79, ttm_div: 12, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2023-08-18", period: "FY2023", period_end: "2023-06-30", ttm_eps: 21.674, ttm_div: 12.5, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2024-08-15", period: "FY2024", period_end: "2024-06-30", ttm_eps: 24.693, ttm_div: 14, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2025-08-25", period: "FY2025", period_end: "2025-06-30", ttm_eps: 9.712, ttm_div: 4, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+  - {date: "2026-08-20", period: "FY2026", period_end: "2026-06-30", ttm_eps: 17.792, ttm_div: 8, source: "SWS export 261003", notes: "Reported annual EPS (SWS); release date = SWS dividend-declaration date (on or just after the results)"}
+
+# ── Half-year EPS (hand-entered, every row sourced) ──────────────────────────
+# ASX companies report every six months; there are no quarterly numbers.
+# When a half's EPS AND the same half a year earlier are both here, the wedge
+# updates trailing-12-month EPS at the half-year release:
+#   TTM = last FY EPS - prior-year 1H EPS + this 1H EPS
+# A half that is missing is listed on the chart; nothing is filled in.
+# Missing for PWH: 1H2016-1H2024 (source: each half's ASX Appendix 4D).
+half_year_eps:
+  - {period: "1H2025", period_end: "2024-12-31", release: "2025-02-21", eps: 4.1, source: "SWS company page (export 261003): 1H 2025 EPS AU$0.041"}
+  - {period: "1H2026", period_end: "2025-12-31", release: "2026-02-20", eps: 5.6, source: "SWS company page (export 261003): 1H 2026 EPS AU$0.056, reported Feb 20"}
+
+# ── What happened (printed on the chart next to the EPS move it explains) ────
+period_notes:
+  FY2020: "COVID: motorsport seasons suspended"
+  FY2025: "FY25 earnings reset: Brisbane factory relocation and A&D build-out costs (NPAT -61% to $9.8m)"
+  1H2026: "Margin recovery starting: 1H26 NPAT +39% to $5.66m"
+  FY2026: "FY26 recovery: NPAT +83% to $17.9m, revenue +31% to $170.7m"
+
+# ── Valuation framework history (optional) ───────────────────────────────────
+# The value wedge applies buy_multiple / sell_multiple above to the whole
+# history unless this list (or the git history of this file) says otherwise.
+# Add a row whenever the BUY/SELL PE is deliberately changed, e.g.
+#   multiple_history:
+#     - {date: "2016-08-25", buy_pe: 25, sell_pe: 45, reason: "Initial framework"}
+#     - {date: "2027-08-31", buy_pe: 25, sell_pe: 50, reason: "A&D now largest division"}
+# Never back-date a change that was not actually made at the time.
+
+# BUY/SELL framework, set Oct 2026 and applied to the whole history on
+# purpose (a view of what PWH is worth on statutory EPS, not a record of past
+# decisions). Fair value = PWH's own median PE since listing, ~34x
+# (Morningstar P/E FY16-FY24: 26.5, 26.9, 30.1, 33.7, 34.7, 51.2, 51.8, 45.0,
+# 31.8; FY25's 80.8x is the depressed-earnings year, left out). Fair sits 35%
+# of the way from BUY to SELL: buy well below value, sell well above it.
+# Cross-check, Sodhi (Intelligent Investor, Apr 2025): BUY below $9 / SELL
+# above $20 on FY27 EPS ~30c = ~30x / ~67x forward; 25x/50x is the tighter,
+# statutory-earnings version of the same view.
+multiple_history:
+  - {date: "2016-08-25", buy_pe: 25, sell_pe: 50, reason: "JM's PWH framework (set Oct 2026), applied to the whole history"}
+fair_split: 0.35
+
+# Statutory EPS understated earning power while PWH moved factories: double
+# running costs (old and new Brisbane sites) and low utilisation of the new
+# one (HY25 NPAT -58% on revenue -2%). The wedge stays on statutory EPS; the
+# chart shades the period and shows the corridor on FY24, the last normal year.
+depressed_earnings:
+  - {start: "2025-02-21", end: null, label: "Brisbane relocation", reference_period: FY2024}
+
+# ── P&L map (A$m, statutory; R = reported, D = derived: 2H = FY - 1H) ──────
+# Sources: Morningstar (export 2 Oct 2026), SWS export 261003, ASX 4E/4D and
+# results decks via news summaries (Fool, Kalkine, Investing.com transcript).
+#            Revenue  EBITDA  EBITDA%  EBIT   NPAT   NPAT%  Capex
+#   FY22      101.1    35.8    35.4    26.9   20.8   20.6    5.0   R
+#   FY23      118.3    39.1    33.0    28.7   21.8   18.4   15.1   R
+#   1H24       64.2    18.4    28.7     -      9.8   15.3     -    R
+#   2H24       75.2    26.8    35.6     -     15.0   19.9     -    D
+#   FY24      139.4    45.2    32.4    32.9   24.8   17.8   12.3   R
+#   1H25       62.9    11.0    17.5     -      4.1    6.5     -    R
+#   2H25       67.2    14.5    21.6     -      5.7    8.5     -    D  (Cyclone Alfred, dual sites)
+#   FY25      130.1    25.5    19.6    11.4    9.8    7.5   40.6   R  (Stapylton capex $33.1m)
+#   1H26       80.4    16.2    20.1     -      5.7    7.0   12.7   R  ($0.8m pre-tax move one-offs + CEO costs)
+#   2H26       90.3    24.5    27.1     -     12.2   13.5   10.0   D  (exit run-rate: no one-offs)
+#   FY26      170.7    40.7    23.8    26.8   17.9   10.5   22.7   R
+# New site's recurring cost: ~$1.2m/yr extra depreciation + ~$1.1m/yr occupancy.
+
+# ── Forecast: NOT reported. Drawn right of today, never used for zones/alerts.
+# Margin-recovery case, Oct 2026. Shares ~100.6m (FY26 NPAT 17.9m / EPS 17.8c).
+#   FY27F: revenue $189m (consensus, 8 analysts, SWS) x NPAT margin ~12.7%.
+#          Guidance (FY26 result): NPAT margin +~2pp in FY27 incl. Poland
+#          start-up (<$1m) -> 12.5%; 2H26 already ran at 13.5%. Consensus EPS 24c.
+#   FY28F: revenue +11% (SWS consensus growth 10.9% pa) = $210m x NPAT margin
+#          15.5%, halfway from FY27 to the 17.8% pre-move margin. Management's
+#          "illustrative pathway" gets back to 17.8% in FY28-FY30. Analog: Treatt
+#          (UK, new factory, 19 months of dual sites) regained its pre-expansion
+#          margin 1-2 years after the trough and did not overshoot; PWH's trough
+#          was far deeper, so halfway in FY28 is the middle of the road.
+#          Full 17.8% in FY28 would be ~37c EPS (SELL $18.60): upside, not the case.
+forecast:
+  label: "Margin-recovery case (Oct 2026)"
+  basis: "FY27F 24.0c = consensus EPS (revenue $189m, NPAT margin ~12.7%; guidance +2pp to ~12.5%). FY28F 32.3c = revenue $210m (+11%) at 15.5% NPAT margin, halfway back to FY24's 17.8%. Full 17.8% in FY28 would be ~37c."
+  extend_to: "2029-02-28"
+  rows:
+    - {period: FY2027, release: "2027-08-19", eps: 24.0, note: "consensus; NPAT margin ~12.7% on $189m (guidance +2pp)"}
+    - {period: FY2028, release: "2028-08-17", eps: 32.3, note: "NPAT margin 15.5% on $210m: halfway back to 17.8%"}
+
+# Story notes printed on the value-wedge chart (optional).
+annotations:
+  - {date: "2025-04-10", label: "Tariff sell-off: position opened (thesis: buy the trough, not the trend)"}

@@ -1,0 +1,103 @@
+name: Micky's Macro
+
+# Structural-trends and investment-intelligence research agent. Reads the
+# four priority Gmail research sources read-only over IMAP, extracts
+# claims, maintains trend dossiers and company candidates, and emails the
+# Weekly Macro Investment Review. Never touches Gmail settings, never
+# trades, never edits another agent's files -- see
+# docs/MICKYS_MACRO_ARCHITECTURE.md.
+#
+# Research content (raw emails, extracted claims, dossier detail) lives in
+# mickys_macro_data/ (gitignored), carried between runs via actions/cache,
+# same pattern hindsight_data/ and esther_data/ already use. Only the
+# public-safe summary (docs/data/mickys_macro.json) is committed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "incremental (ingest only) | backfill (long lookback, run once) | daily | weekly"
+        type: choice
+        options: [daily, weekly, incremental, backfill]
+        default: weekly
+      no_email:
+        description: "Run without sending an email (ingest + dossiers + dashboard only)"
+        type: boolean
+        default: false
+concurrency:
+  group: mickys-macro
+  cancel-in-progress: false
+
+jobs:
+  mickys_macro:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyyaml pydantic anthropic weasyprint
+
+      - name: Restore Micky's Macro memory
+        uses: actions/cache/restore@v4
+        with:
+          path: mickys_macro_data
+          key: mickys-macro-data-${{ github.run_id }}
+          restore-keys: |
+            mickys-macro-data-
+
+      - name: Decide run mode
+        id: mode
+        run: |
+          if [ -n "${{ inputs.mode }}" ]; then
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=weekly" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Micky's Macro
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          # Reads from the same Gmail mailbox agents already send from, over
+          # IMAP, read-only. Override with its own secrets only if research
+          # mail arrives at a different address than the sending one.
+          MICKYS_MACRO_IMAP_USER: ${{ secrets.MICKYS_MACRO_IMAP_USER }}
+          MICKYS_MACRO_IMAP_PASSWORD: ${{ secrets.MICKYS_MACRO_IMAP_PASSWORD }}
+          MICKYS_MACRO_MAX_LLM_CALLS: "25"
+          NO_EMAIL: ${{ inputs.no_email && '--no-email' || '' }}
+        run: |
+          python -m mickys_macro run --mode "${{ steps.mode.outputs.mode }}" $NO_EMAIL
+
+      - name: Publish Micky's Macro to the dashboard
+        if: always()
+        run: |
+          if [ ! -f docs/data/mickys_macro.json ] && [ ! -f watchlists/macro_candidates_proposed.yaml ]; then
+            echo "nothing to publish this run"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          for f in docs/data/mickys_macro.json watchlists/macro_candidates_proposed.yaml; do [ -f "$f" ] && git add "$f"; done
+          git diff --staged --quiet || git commit -m "Micky's Macro data [skip ci]"
+          git pull --rebase origin HEAD
+          python scripts/build_dashboard.py
+          git add docs/index.html
+          git diff --staged --quiet || git commit -m "Dashboard update -- Micky's Macro [skip ci]"
+          git push origin HEAD
+
+      - name: Save Micky's Macro memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: mickys_macro_data
+          key: mickys-macro-data-${{ github.run_id }}

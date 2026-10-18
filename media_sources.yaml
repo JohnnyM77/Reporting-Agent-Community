@@ -1,0 +1,145 @@
+# media_sources.yaml
+#
+# Ned the News Agent — media source configuration.
+#
+# HOW TO ADD/REMOVE SOURCES:
+#   YouTube: add a new entry under youtube_channels with the @handle and a
+#            friendly label. Ned resolves the channel ID at runtime via the
+#            YouTube Data API.
+#   RSS:     add a URL under rss_feeds. Any standard RSS/Atom feed works.
+#            Set news_scan: false on ETF tickers you want excluded.
+#
+# SCANNING WINDOW: Ned searches for videos/articles published within the
+# last `lookback_hours` hours on each run.
+
+lookback_hours: 48
+
+youtube_channels:
+  - handle: market-index
+    label: Market Index
+  - handle: ASXLtd
+    label: ASX Official
+  - handle: ASXSmallCapWrap
+    label: ASX Small Cap Wrap
+  - handle: TheStockNetwork
+    label: The Stock Network
+  - handle: FoolAu
+    label: Motley Fool Australia
+  - handle: foragerfundsmanagement5034
+    label: Forager Funds Management
+  - handle: NWRCommunications
+    label: NWR Communications
+  - handle: ausbiz
+    label: Ausbiz          # verified @ausbiz, channel UCPUtIMq2pHnsccSZa4gxxaA
+
+rss_feeds:
+  - url: "https://news.google.com/rss/search?q={query}&hl=en-AU&gl=AU&ceid=AU:en"
+    label: Google News
+    type: google_news   # {query} is replaced per-company at runtime
+
+  # Same Google News search, restricted to the outlets worth reading. Returns
+  # headlines even for paywalled sites (AFR, The Australian), and covers sites
+  # whose own feeds block bots (Livewire, Stockhead). One query per company.
+  - url: "https://news.google.com/rss/search?q={query}&hl=en-AU&gl=AU&ceid=AU:en"
+    label: Target sites
+    type: google_news_sites
+    sites:
+      - livewiremarkets.com
+      - ausbiz.com.au
+      - marketindex.com.au
+      - afr.com
+      - theaustralian.com.au
+      - stockhead.com.au
+      - morningstar.com.au
+      - firstlinks.com.au
+      - businessnews.com.au
+      - moneymanagement.com.au
+
+  - url: "https://www.livewiremarkets.com/feed"
+    label: Livewire Markets
+    type: static        # full feed, filtered by company name in content
+    tier: 1
+
+  - url: "https://www.fool.com.au/feed/"
+    label: Motley Fool Australia
+    type: static
+    tier: 2
+
+  - url: "https://themarketonline.com.au/feed/"
+    label: The Market Online
+    type: static
+    tier: 2
+
+  - url: "https://stockhead.com.au/feed/"
+    label: Stockhead
+    type: static        # may block bots; the Target sites search covers it either way
+    tier: 2
+
+  - url: "https://stockanalysis.com/news/feed/"
+    label: Stock Analysis News
+    type: static
+
+# Source quality tiers. Case-insensitive substring match against the
+# publisher name, publisher URL and article link. Anything unlisted is tier 2.
+#   tier1: quality journalism, small ranking lift
+#   tier3: AI rewrite mills. Capped at LOW, no LLM summary, collapsed into one
+#          "Wire rewrites" line at the bottom of the email, never on the dashboard.
+source_tiers:
+  tier1:
+    - afr.com
+    - financial review
+    - livewire
+    - ausbiz
+    - market index
+    - marketindex.com.au
+    - the australian
+    - theaustralian.com.au
+    - reuters
+    - bloomberg
+    - morningstar
+    - firstlinks
+    - business news
+    - kestrel
+  tier2:
+    - motley fool
+    - fool.com.au
+    - stockhead
+    - the market online
+    - proactive
+    - sharecafe
+  tier3:
+    - kalkine
+
+# Same story from several outlets about the same company collapses to the
+# best-tier version ("also covered by ..."). 0.6 = 60% headline word overlap.
+dedupe:
+  similarity: 0.6
+
+# Email newsletters / daily briefs.
+#   web_archive: dated public URL; read directly, no inbox needed
+#   from:        sender address; read from Gmail over IMAP (read-only) as a
+#                backup, or as the only route for email-only newsletters.
+#                Needs NED_IMAP_USER + NED_IMAP_PASSWORD (a Gmail app password).
+#   digest:      true = one LLM read of the whole issue against the portfolio,
+#                catching indirect items (a tender that matters to DRO)
+#   watch:       themes handed to that LLM read
+#   tier:        source tier for direct name matches (default 1)
+newsletters:
+  - label: Kestrel Run
+    from: brief@kestrelrun.com
+    web_archive: "https://www.kestrelrun.com/briefs/{date}"
+    timezone: Australia/Sydney
+    web_start_marker: "Top Line"
+    digest: true
+    tier: 1
+    watch:
+      - counter-drone and electronic warfare (DRO)
+      - defence cyber and data security (AR9)
+      - Defence procurement, AusTender contracts, AUKUS spend
+      - sovereign industry policy and Defence budget
+
+# Tickers to skip for news scanning (ETFs — no meaningful press releases)
+skip_news_tickers:
+  - VAS
+  - VEU
+  - VHY

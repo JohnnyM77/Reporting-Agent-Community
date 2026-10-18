@@ -1,0 +1,94 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# BXB.AX — Brambles Limited  |  Value Chart Config
+# Global pallet-pooling and supply chain logistics leader.
+# CHEP pallets operate across 60+ countries — near-monopoly in many markets.
+# Quality compounder — network effects and switching costs give pricing power.
+# Reports in USD; EPS below in AUD cents at prevailing exchange rates.
+# ──────────────────────────────────────────────────────────────────────────────
+
+ticker: BXB.AX
+company_name: Brambles Limited
+business: "Global pallet/crate/container pooling (CHEP brand) — Americas, EMEA, Asia Pacific; supply chain logistics"
+exchange: ASX
+
+stock_type: quality         # Quality compounder — dominant market position with moat
+
+buy_multiple: archetype     # from config/valuation_archetypes.yaml via shared/classifier.py (Oct 2026)
+sell_multiple: auto         # own 10-year median P/E, 1.5-3x BUY (sell rule, valuation_archetypes.yaml)
+rror: 0.03                  # 3% — steady dividend growth
+norm_eps: null              # Quality compounder — no cyclical mean-reversion
+
+chart:
+  dimensions:
+    width: 34
+    height: 20
+
+  left_axis:
+    label: "Price (AUD $)"
+    min: 0.0
+    max: 25.0             # BXB peaked ~$20-21; $25 gives headroom
+    major_unit: 2.0
+    num_fmt: '"$"#,##0.00'
+
+  right_axis:
+    label: "P/E Ratio"
+    min: 0.0
+    max: 35.0             # Quality logistics can trade at up to 30+ P/E
+    major_unit: 5.0
+    num_fmt: "0.0"
+
+  x_axis:
+    num_fmt: "MMM-YY"
+    tick_label_skip: 26
+    tick_mark_skip: 26
+
+  lines:
+    price:
+      color: "1565C0"
+      width_emu: 9525
+      style: solid
+    value_buy:
+      color: "1A5E20"
+      width_emu: 19050
+      style: dash
+    value_sell:
+      color: "C0392B"
+      width_emu: 19050
+      style: dash
+    div_rror:
+      color: "2E7D32"
+      width_emu: 19050
+      style: dash
+    pe_smooth:
+      color: "B8860B"
+      width_emu: 15875
+      style: solid
+
+  pe_smooth_days: 60
+  legend_position: "t"
+  legend_overlay: true
+  axis_title_box:
+    fill: "FFFF00"
+    border_color: "000000"
+    border_width_emu: 9525
+    text_bold: true
+    text_color: "000000"
+    font_size_pt: 9
+  legend_box:
+    fill: "FFFFFF"
+    border_color: "404040"
+    border_width_emu: 12700
+
+price_data:
+  frequency: weekly
+  resample_day: "W-FRI"
+  start_date: "2016-01-01"
+  source_hint: "marketindex.com.au/asx/bxb — export daily CSV (Date as YYYYMMDD)"
+  stockhistory_formula: '=STOCKHISTORY("BXB.AX",DATE(2016,1,1),TODAY(),0,1,0,1)'
+
+# ── Earnings ─────────────────────────────────────────────────────────────────
+# Oct 2026: the hand-typed rows here were all "Est." (never verified), so they
+# were removed. EPS now comes from EODHD's reported statements at run time:
+# statutory NPAT / checked share count, each year from its release date
+# (shared/eps_history.py). Sally's wedge and Wally's value chart both read it.
+earnings_source: eodhd

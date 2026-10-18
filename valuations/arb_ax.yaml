@@ -1,0 +1,155 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# ARB.AX — ARB Corporation  |  Value wedge + value chart config
+# 4WD accessories: Australian aftermarket (~56% of sales), export incl. US
+# (~38%), OEM (~6%). Net cash, no debt.
+# ──────────────────────────────────────────────────────────────────────────────
+
+ticker: ARB.AX
+company_name: ARB Corporation
+business: "4WD accessories manufacturer & retailer — Aus aftermarket, export (US), OEM"
+exchange: ASX
+
+stock_type: quality
+
+# BUY multiple: from the archetype rules (config/valuation_archetypes.yaml via
+# shared/classifier.py), never typed here. Oct 2026: defensive_mature 15x +2
+# stability = 17x on 3-year average EPS (classifier suggestion; confirm or
+# override it in config/ticker_archetypes.yaml).
+# SELL 30x: just above ARB's own 10-year median P/E (28.4x, classifier).
+buy_multiple: archetype
+sell_multiple: 30
+multiple_history:
+  - {date: "2016-08-17", buy_pe: archetype, sell_pe: 30, reason: "Archetype BUY / SELL above the 10-year median (set Oct 2026), applied to the whole history"}
+fair_split: 0.3
+rror: 0.03                # Wally's value chart: required dividend yield
+
+chart:
+  dimensions:
+    width: 34
+    height: 20
+
+  left_axis:
+    label: "Price (AUD $)"
+    min: 0.0
+    max: 60.0             # ARB trades $10–$50 range historically
+    major_unit: 5.0
+    num_fmt: '"$"#,##0.00'
+
+  right_axis:
+    label: "P/E Ratio"
+    min: 0.0
+    max: 50.0             # Quality stocks carry higher P/Es
+    major_unit: 5.0
+    num_fmt: "0.0"
+
+  x_axis:
+    num_fmt: "MMM-YY"
+    tick_label_skip: 26
+    tick_mark_skip: 26
+
+  lines:
+    price:
+      color: "1565C0"
+      width_emu: 9525
+      style: solid
+    value_buy:
+      color: "1A5E20"
+      width_emu: 19050
+      style: dash
+    value_sell:
+      color: "C0392B"
+      width_emu: 19050
+      style: dash
+    div_rror:
+      color: "2E7D32"
+      width_emu: 19050
+      style: dash
+    pe_smooth:
+      color: "B8860B"
+      width_emu: 15875
+      style: solid
+
+  pe_smooth_days: 60
+  legend_position: "t"
+  legend_overlay: true
+  axis_title_box:
+    fill: "FFFF00"
+    border_color: "000000"
+    border_width_emu: 9525
+    text_bold: true
+    text_color: "000000"
+    font_size_pt: 9
+  legend_box:
+    fill: "FFFFFF"
+    border_color: "404040"
+    border_width_emu: 12700
+
+price_data:
+  frequency: weekly
+  resample_day: "W-FRI"
+  start_date: "2016-01-01"
+  source_hint: "marketindex.com.au/asx/arb — export daily CSV (Date as YYYYMMDD)"
+  stockhistory_formula: '=STOCKHISTORY("ARB.AX",DATE(2016,1,1),TODAY(),0,1,0,1)'
+
+# ── EPS: statutory, from EODHD statements (no estimates) ─────────────────────
+# Annual EPS = income-statement NPAT / shares on issue at year end
+# (shared.eodhd.annual_eps; both share counts checked). Matches the reports:
+# FY24 124.8c vs 124.88c reported, FY26 110.6c vs 111c. Each figure applies
+# from its release date. The wedge values on the archetype's EPS basis (3-year
+# average); the statutory corridor is drawn faint behind it.
+eps_basis: reported_ttm
+earnings:
+  - {date: "2016-08-17", period: "FY2016", period_end: "2016-06-30", ttm_eps: 59.92, ttm_div: 31.5, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $47.4m / 79.2m shares; dividends = ex-dates in calendar 2016 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2017-08-16", period: "FY2017", period_end: "2017-06-30", ttm_eps: 62.07, ttm_div: 34, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $49.2m / 79.2m shares; dividends = ex-dates in calendar 2017 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2018-08-13", period: "FY2018", period_end: "2018-06-30", ttm_eps: 64.31, ttm_div: 37, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $51.0m / 79.3m shares; dividends = ex-dates in calendar 2018 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2019-08-19", period: "FY2019", period_end: "2019-06-30", ttm_eps: 71.78, ttm_div: 39.5, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $57.1m / 79.6m shares; dividends = ex-dates in calendar 2019 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2020-08-17", period: "FY2020", period_end: "2020-06-30", ttm_eps: 71.77, ttm_div: 58, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $57.3m / 79.8m shares; dividends = ex-dates in calendar 2020 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2021-08-17", period: "FY2021", period_end: "2021-06-30", ttm_eps: 139.25, ttm_div: 68, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $112.9m / 81.1m shares; dividends = ex-dates in calendar 2021 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2022-08-23", period: "FY2022", period_end: "2022-06-30", ttm_eps: 149.21, ttm_div: 71, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $122.0m / 81.8m shares; dividends = ex-dates in calendar 2022 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2023-08-22", period: "FY2023", period_end: "2023-06-30", ttm_eps: 107.83, ttm_div: 62, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $88.5m / 82.0m shares; dividends = ex-dates in calendar 2023 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2024-08-20", period: "FY2024", period_end: "2024-06-30", ttm_eps: 124.77, ttm_div: 69, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $102.7m / 82.3m shares; dividends = ex-dates in calendar 2024 (interim Apr + final Oct); EODHD reportDate"}
+  - {date: "2025-08-18", period: "FY2025", period_end: "2025-06-30", ttm_eps: 117.32, ttm_div: 119, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $97.5m / 83.1m shares; dividends = ex-dates in calendar 2025 (interim Apr + final Oct + 50c special); EODHD reportDate"}
+  - {date: "2026-08-25", period: "FY2026", period_end: "2026-06-30", ttm_eps: 110.57, ttm_div: 69, source: "EODHD income statement + EODHD dividends", notes: "Statutory NPAT $92.4m / 83.6m shares; dividends = ex-dates in calendar 2026 (interim Apr + final Oct); FY26 result 25 Aug 2026 (price +13.8% that day)"}
+
+period_notes:
+  FY2021: "COVID 4WD boom: NPAT +97%"
+  FY2023: "Post-COVID normalisation: NPAT -27%"
+  FY2024: "Recovery: NPAT +16%"
+  FY2026: "Profit warning Jan 2026 (1H PBT -16%); FY26 NPAT -5%, 2H PBT up on 1H"
+
+# ── Forecast: NOT reported. Two cases, drawn right of today. ───────────────
+# Recovery = analyst consensus (EODHD earnings trends, 16 analysts, 12 Oct 2026).
+# No recovery = EPS keeps falling ~6% a year, as it did FY24 -> FY26
+# (124.8c -> 110.6c); FY27 sits at the bottom of the analysts' range (103.5c).
+forecast:
+  extend_to: "2029-02-28"
+  cases:
+    - label: "Recovery"
+      basis: "Consensus EPS: FY27 113.4c (range 103.5-122.0c), FY28 125.3c (111.6-138.0c), 16 analysts, EODHD 12 Oct 2026. FY27 consensus was 116.5c 90 days earlier."
+      rows:
+        - {period: FY2027, release: "2027-08-24", eps: 113.4, note: "consensus: OEM supply back, 2H26 margin recovery holds, US growth"}
+        - {period: FY2028, release: "2028-08-22", eps: 125.3, note: "consensus: back to FY24's 125c"}
+    - label: "No recovery"
+      basis: "EPS keeps falling ~6% a year as FY24-FY26 (124.8c -> 110.6c): FY27 104c (bottom of the analysts' range), FY28 98c."
+      rows:
+        - {period: FY2027, release: "2027-08-24", eps: 104.0, note: "trend decline continues"}
+        - {period: FY2028, release: "2028-08-22", eps: 98.0, note: "trend decline continues"}
+
+# ── Does it recover? (printed in Sally's email; facts as at 12 Oct 2026) ─────
+outlook:
+  as_of: "12 Oct 2026"
+  recover:
+    - "2H FY26 underlying PBT $60.7m beat 1H's $58.0m: two price rises and a better baht hedge are already working."
+    - "OEM fell 27% on program timing, not lost share; Toyota supply (HiLux, Prado, LC300, LC70) is improving into 1H FY27."
+    - "US sales +10% in FY26 (+26% in 1H) through Toyota US, e-commerce and the 4 Wheel Parts / ORW networks."
+    - "It has done this before: NPAT fell 27% in FY23 then rose 16% in FY24."
+    - "Net cash, no debt, and the 69c fully franked dividend held through the downturn."
+    - "15x trailing earnings against a 10-year median of about 28x; analysts expect EPS back to 125c by FY28."
+  not_recover:
+    - "Diesel 4x4 ute sales -13% year on year (Sep 2026) as buyers move to EVs and hybrids: ARB's core customer shrinking."
+    - "Australia is 56% of sales and the aftermarket fell 3.3% in FY26."
+    - "Thai-made product: exposed to the baht and a 12.5% US Section 301 tariff on Thai goods from 24 Jul 2026."
+    - "EPS has fallen three years running (149c FY22 to 111c FY26) and FY27 consensus is drifting down (116.5c to 113.4c in 90 days)."
+    - "Return on equity has slid from 26% (FY21) to about 12% (FY26)."
+    - "Costs keep rising: engineering spend +10-15%, China and South Africa start-ups, associate losses."
+  note: "Sources: ARB 1H FY26 Appendix 4D and FY26 results coverage (Investing.com, Kalkine, Motley Fool, Roger Montgomery), VFACTS via CarExpert, EODHD statements, prices and consensus. Secondary sources: check the ASX releases before relying on a figure."

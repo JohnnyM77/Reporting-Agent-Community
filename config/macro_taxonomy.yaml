@@ -1,0 +1,43 @@
+# Micky's Macro -- the macro-trend taxonomy (brief section 4). Extend this
+# list when evidence warrants a new category; never delete a category that
+# has dossiers filed under it -- retire it by leaving its dossiers in place
+# and simply filing no new claims there.
+categories:
+  - id: AI_AUTOMATION_ROBOTICS
+    label: AI, automation, robotics and productivity
+  - id: SEMICONDUCTORS_COMPUTE
+    label: Semiconductors, compute and digital infrastructure
+  - id: ELECTRICITY_GRID
+    label: Electricity demand, power generation and grid infrastructure
+  - id: ELECTRIFICATION_METALS
+    label: Electrification, copper and industrial metals
+  - id: CRITICAL_MINERALS
+    label: Critical minerals and strategic resources
+  - id: ENERGY_SECURITY
+    label: Energy security, oil, gas, LNG and nuclear power
+  - id: RENEWABLES_STORAGE
+    label: Renewables, batteries and energy storage
+  - id: FOOD_SECURITY_AG
+    label: Food security, agricultural productivity and potash
+  - id: WATER
+    label: Water scarcity, treatment and infrastructure
+  - id: DEMOGRAPHICS_HEALTHCARE
+    label: Demographics, ageing populations and healthcare
+  - id: POPULATION_URBANISATION
+    label: Population growth, urbanisation and housing
+  - id: DEFENCE_GEOPOLITICS
+    label: Defence, rearmament and geopolitical fragmentation
+  - id: SUPPLY_CHAIN_RESHORING
+    label: Supply-chain resilience, reshoring and industrial policy
+  - id: DEBT_MONETARY_REGIME
+    label: Global debt, monetary regimes, inflation and fiscal sustainability
+  - id: TRADE_TARIFFS_CURRENCY
+    label: Trade, tariffs, currencies and capital flows
+  - id: CYBERSECURITY
+    label: Cybersecurity and digital sovereignty
+  - id: TRANSPORT_LOGISTICS
+    label: Transport, logistics and infrastructure
+  - id: FINANCIAL_MARKET_STRUCTURE
+    label: Financial services and changes in financial market structure
+  - id: OTHER_EMERGING
+    label: Emerging technologies and other material structural shifts

@@ -1,0 +1,108 @@
+name: Ned — AusBiz Video Transcript
+
+# On-demand workflow to fetch, transcribe, analyse and digest AusBiz (or other)
+# financial video content against the portfolio.
+#
+# Runs on the self-hosted Windows runner so it can:
+#   1. Access local network resources (video URLs that might be geo-blocked or
+#      corporate-network-restricted)
+#   2. Use Chrome (already installed for Ned's YouTube path) to download video
+#      via Playwright if needed
+#   3. Extract audio with ffmpeg (already installed)
+#   4. Transcribe with Whisper via OPENAI_API_KEY
+#   5. Run through Ned's full digest pipeline (portfolio context, PDF, email)
+#   6. Publish to the dashboard
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: >
+          Video URL (AusBiz link, direct .mp4, or any video URL accessible
+          from your local network)
+        required: true
+        type: string
+      title_override:
+        description: >
+          Optional title override. If blank, extracted from page or filename.
+        required: false
+        type: string
+
+jobs:
+  transcript:
+    runs-on: [self-hosted, Windows]
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Python 3.14
+        run: |
+          # Use the machine-installed Python from CLAUDE.md
+          $pythonPath = "C:\Users\mr_co\AppData\Local\Programs\Python\Python314\python.exe"
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $pythonPath)
+          python --version
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-ned.txt
+          python -m pip install weasyprint
+
+      - name: Add ffmpeg to PATH
+        run: |
+          # Add ffmpeg to PATH for this job (installed at C:\ffmpeg)
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\ffmpeg\bin"
+          Write-Host "ffmpeg PATH: $(Get-ChildItem env:PATH)"
+
+      - name: Fetch video + transcribe + digest
+        env:
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          NED_VIDEO_URL: ${{ inputs.video_url }}
+          NED_VIDEO_TITLE_OVERRIDE: ${{ inputs.title_override }}
+          NED_TRANSCRIPT_MODEL: ${{ vars.NED_TRANSCRIPT_MODEL }}
+          NED_TRANSCRIPT_MAX_TOKENS: ${{ vars.NED_TRANSCRIPT_MAX_TOKENS }}
+          NED_TRANSCRIPT_LLM_MAX_CHARS: ${{ vars.NED_TRANSCRIPT_LLM_MAX_CHARS }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python -m ned.main video
+
+      - name: Upload transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ned-video-transcripts
+          path: transcripts/
+          if-no-files-found: ignore
+
+      - name: Commit dashboard update
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if (Test-Path "docs/data/transcripts.json") {
+            git add docs/data/transcripts.json
+            if (Test-Path "docs/transcripts") {
+              git add -A docs/transcripts
+            }
+            git diff --staged --quiet
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "No changes to commit"
+            } else {
+              git commit -m "Ned transcripts data [skip ci]"
+              git pull --rebase origin HEAD
+              python scripts/build_dashboard.py
+              git add docs/index.html
+              git diff --staged --quiet
+              if ($LASTEXITCODE -ne 0) {
+                git commit -m "Dashboard update -- Ned transcripts [skip ci]"
+              }
+              git push origin HEAD
+            }
+          } else {
+            Write-Host "No transcripts.json produced this run; nothing to commit."
+          }

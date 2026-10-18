@@ -1,0 +1,116 @@
+{
+ "ticker": "SMP",
+ "company": "Sample Co",
+ "event": "FY26 result, 1 Jan 2026",
+ "publish_recommendation": "PUBLISH_NEW",
+ "publish_reason": "First narrative on a new result.",
+ "what_changed": [
+  "Revenue up 5%",
+  "Margin down 2 points"
+ ],
+ "what_did_not_change": [
+  "Balance sheet"
+ ],
+ "assumptions_to_change": [
+  "Margin"
+ ],
+ "why_it_matters": "Margins drive value.",
+ "my_read": "Fine result. Cash lagged profit.",
+ "the_numbers": [
+  {
+   "label": "Revenue",
+   "value": "$100m",
+   "note": "+5%"
+  }
+ ],
+ "statutory_vs_underlying": "Statutory NPAT $9m vs underlying $10m; the $1m gap is restructuring, second year running.",
+ "cash_flow_and_balance_sheet": "OCF $11m, net cash $5m.",
+ "management_claims_tested": [
+  {
+   "claim": "Margins recover",
+   "evidence": "None yet",
+   "verdict": "TOO EARLY"
+  }
+ ],
+ "base_figures": {
+  "revenue_m": 100,
+  "revenue_period": "FY26",
+  "shares_m": 50,
+  "report_currency": "AUD",
+  "price": 2.5,
+  "price_currency": "AUD",
+  "price_date": "2026-01-02",
+  "discount_rate": 0.075,
+  "share_change_pa": 0,
+  "dps": 0.1,
+  "source": "FY26 annual report"
+ },
+ "key_valuation_driver": "Net margin",
+ "biggest_valuation_risk": "Margins stay down",
+ "title": "Revenue is up... the cash hasn't joined the party",
+ "narrative": "## The result\nRevenue rose 5% to $100m. Cash did not keep up.\n\n## So what?\nI'm watching margins. I could be wrong, wouldn't be the first time.",
+ "quick_update": {
+  "title": "Short one",
+  "narrative": "Revenue rose 5% to $100m and cash lagged. Watching margins next half. I could be wrong, wouldn't be the first time. That's about it for this one, and it is short on purpose because not much happened apart from the margin slipping two points while management told us it would recover soon, which it may or may not do next half."
+ },
+ "so_what": "Hold, watch margins.",
+ "watching_next": [
+  "1H27 margin"
+ ],
+ "what_would_change_my_mind": [
+  "Margin below 8%"
+ ],
+ "thesis_check": {
+  "verdict": "THESIS INTACT",
+  "why": "Nothing broke."
+ },
+ "challenge": {
+  "strongest_argument_against": "a",
+  "weakest_assumption": "b",
+  "number_jm_is_fooling_himself_with": "c",
+  "what_the_market_may_understand": "d",
+  "evidence_that_forces_a_rethink": "e"
+ },
+ "would_i_own_it_fresh": "Yes, smaller.",
+ "evidence": [
+  {
+   "source": "FY26 report",
+   "date": "2026-01-01",
+   "fact": "Revenue $100m",
+   "why_it_matters": "Base"
+  },
+  {
+   "source": "FY26 report",
+   "date": "2026-01-01",
+   "fact": "NPAT $9m",
+   "why_it_matters": "Margin"
+  },
+  {
+   "source": "FY26 report",
+   "date": "2026-01-01",
+   "fact": "OCF $11m",
+   "why_it_matters": "Cash"
+  }
+ ],
+ "insufficient_evidence": [],
+ "self_check": {
+  "new_insight": true,
+  "nothing_invented": true
+ },
+ "narrative_case": {
+  "revenue_growth": 0.05,
+  "net_margin": 0.15,
+  "future_pe": 15,
+  "rationale": {
+   "revenue_growth": "Guidance",
+   "net_margin": "Better-year average",
+   "future_pe": "Own 5-year average"
+  }
+ },
+ "stress_case": {
+  "revenue_growth": 0.02,
+  "net_margin": 0.1,
+  "future_pe": 12,
+  "rationale": "Margin recovery fails"
+ }
+}

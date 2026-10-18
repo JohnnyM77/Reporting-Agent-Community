@@ -1,0 +1,4995 @@
+# agent.py
+#
+# Investor-grade ASX announcements agent ("Bob the Bot"):
+# - Includes ALL announcements in an FYI section (headline-only, 2 lines + link)
+# - Uses Requests first for PDFs; if ASX consent gate blocks, falls back to Playwright
+# - Runs deep analysis only for HY/FY results, acquisitions, and capital/debt raises
+# - Produces clean email: HIGH IMPACT + MATERIAL + FYI, or a plain
+#   no-announcements message with a local joke of the day
+# - Uploads PDFs to Google Drive for big announcements and includes Drive view links
+# - Never hallucinates off the ASX "Access to this site" legal page
+# - Optionally emails AR9 items to your brother (BROTHER_EMAIL secret)
+# - Uses Anthropic Claude API for all AI analysis (native PDF support)
+
+from __future__ import annotations
+
+import os
+import re
+import json
+import hashlib
+import tempfile
+import time
+import datetime as dt
+import textwrap
+import html as htmlmod
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+
+import requests
+from bs4 import BeautifulSoup
+import yaml
+from pypdf import PdfReader
+try:
+    from weasyprint import HTML, CSS
+except ImportError:
+    HTML = CSS = None
+
+import asyncio
+from playwright_fetch import fetch_pdf_with_playwright
+from asx_fetch import fetch_asx_announcements_html
+from shared.asx import absolute_url, browser_session, extract_ids_id, pdf_url_for_ids_id
+from shared import gdrive
+from shared.email_service import send_email as shared_send_email
+from shared.llm import STREAMING_MIN_TOKENS, call_with_retry, make_client, send as llm_send
+from shared.pdf_llm import (
+    LLM_FAILED,
+    LLM_SKIPPED,
+    PdfAttachment,
+    build_pdf_attachments,
+    build_single_pdf_content,
+)
+
+from prompts import (
+    DEFAULT_2LINE_PROMPT,
+    ACQUISITION_PROMPT,
+    FUNDRAISE_PROMPT,
+    RESULTS_HYFY_PROMPT,
+    REMUNERATION_PROMPT,
+    TRADING_UPDATE_PROMPT,
+    QUARTERLY_4C_PROMPT,
+    PRICE_SENSITIVE_PROMPT,
+)
+
+BOB_NAME = "Bob the Bot"
+VERSION_LABEL = "V3"
+
+HOURS_BACK = 24
+SEEN_STATE_PATH = Path(os.environ.get("SEEN_STATE_PATH", "state_seen.json"))
+SEEN_STATE_RETENTION_HOURS = 72
+
+MAX_ANNOUNCEMENTS_PER_TICKER = 12
+
+
+def _int_env(name: str, default: int) -> int:
+    """Read a positive integer from the environment, falling back on junk."""
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"[agent] Ignoring non-integer {name}={raw!r} — using {default}", flush=True)
+        return default
+    return value if value > 0 else default
+
+
+# Reporting season regularly puts several portfolio names on the same morning,
+# and each results item now costs exactly one call (see deep_results_analysis),
+# so the run budget is sized for that rather than for a quiet day. Override
+# with the MAX_LLM_CALLS env var.
+MAX_LLM_CALLS_PER_RUN = _int_env("MAX_LLM_CALLS", 25)
+
+# One results item downloads its whole bundle — release, accounts and deck —
+# so a single reporter can spend 3-4 of these. At the old hardcoded 10, two
+# reporters on the same morning plus a few price-sensitive items elsewhere
+# exhausted the budget, and every ticker after that silently degraded: the
+# PDF is skipped, the HTML fallback hits the ASX consent gate, and the item
+# renders as "couldn't extract meaningful content" — indistinguishable from a
+# genuine fetch failure. Sized for a full reporting-season morning; override
+# with MAX_PDFS.
+MAX_PDFS_PER_RUN = _int_env("MAX_PDFS", 30)
+
+# RESULTS_TICKER lookback. A results run reaches back this far to find a
+# ticker's most recent half-year or full-year report, because a company may
+# have last reported a month or two ago rather than in the normal 24h window.
+# ASX names report twice a year, so 180 days (~6 months) reliably catches the
+# latest reporting event without straddling two of them. Override with
+# RESULTS_LOOKBACK_DAYS.
+RESULTS_LOOKBACK_DAYS = _int_env("RESULTS_LOOKBACK_DAYS", 180)
+
+# Per-call output-token budgets. The default (4096) is enough for the terse
+# two-liners and the short structured memos on the other paths. The results
+# path is different: the model returns metrics JSON *plus* a full markdown
+# analysis with ~11 sections, which for a large reporter (BHP, CSL) blows
+# past 4096 mid-string and leaves the JSON truncated — the caller then sees
+# a parse_error and the digest shows ANALYSIS FAILED. The results ceiling is
+# sized so no realistic results announcement can be truncated; override with
+# CLAUDE_RESULTS_MAX_TOKENS.
+DEFAULT_MAX_TOKENS = _int_env("CLAUDE_MAX_TOKENS", 4096)
+RESULTS_MAX_TOKENS = _int_env("CLAUDE_RESULTS_MAX_TOKENS", 50000)
+# Remuneration deep-dives return a structured header plus a ~10-section
+# markdown analysis (same shape as results). Sized so a rules document with
+# a full delta-vs-previous-plan table can't be truncated. Override with
+# CLAUDE_REMUNERATION_MAX_TOKENS.
+REMUNERATION_MAX_TOKENS = _int_env("CLAUDE_REMUNERATION_MAX_TOKENS", 50000)
+
+# Fundraising (capital raise / debt raise) structured analysis. Same shape as
+# results: a locked quick-take card + <=5-sentence summary + long-form markdown
+# that becomes the attached PDF. Sized so a multi-tranche bond raise with a
+# full maturity-ladder discussion can't be truncated. Override with
+# CLAUDE_FUNDRAISE_MAX_TOKENS.
+FUNDRAISE_MAX_TOKENS = _int_env("CLAUDE_FUNDRAISE_MAX_TOKENS", 50000)
+
+# Acquisitions: same shape as fundraise — a locked quick-take card + <=5-
+# sentence summary + long-form markdown for the attached PDF. Sized like
+# results/fundraise since a two-target deal (AHC's CareTech + RTM) can run
+# just as long. Override with CLAUDE_ACQUISITION_MAX_TOKENS.
+ACQUISITION_MAX_TOKENS = _int_env("CLAUDE_ACQUISITION_MAX_TOKENS", 50000)
+
+# Trading updates and 4C/5B quarterly cash flow reports: a locked quick-take
+# card + <=5-sentence summary + long-form markdown for the attached PDF, same
+# shape as the fundraise card but shorter source documents — no full income
+# statement or segment walk, so the default ceiling is lower than results'.
+# Override with CLAUDE_TRADING_UPDATE_MAX_TOKENS / CLAUDE_4C_MAX_TOKENS.
+TRADING_UPDATE_MAX_TOKENS = _int_env("CLAUDE_TRADING_UPDATE_MAX_TOKENS", 20000)
+QUARTERLY_4C_MAX_TOKENS = _int_env("CLAUDE_4C_MAX_TOKENS", 20000)
+
+MIN_RESULTS_TEXT_CHARS = 2500
+MODEL_DEFAULT = "claude-sonnet-4-6"
+
+REQUESTS_PDF_TIMEOUT_SECS = 20
+HTML_TIMEOUT_SECS = 30
+
+COLOR_HIGH_IMPACT = "#F59E0B"
+COLOR_MATERIAL = "#3B82F6"
+COLOR_FYI = "#10B981"
+COLOR_BG = "#0B1220"
+COLOR_PANEL = "#111B2E"
+COLOR_TEXT = "#E5E7EB"
+
+# Results card ("dark-green finance theme") — a light, high-contrast card that
+# reads on a phone against the dark digest background.
+COLOR_RESULTS_HEADER = "#14532D"
+COLOR_RESULTS_HEADER_SUB = "#A7F3D0"
+COLOR_RESULTS_CARD = "#FFFFFF"
+COLOR_RESULTS_ROW_SHADE = "#F1F5F2"
+COLOR_RESULTS_LABEL = "#374151"
+COLOR_RESULTS_VALUE = "#111827"
+COLOR_RESULTS_MUTED = "#6B7280"
+COLOR_CHANGE_UP = "#15803D"
+COLOR_CHANGE_DOWN = "#B91C1C"
+COLOR_CHANGE_NEUTRAL = "#9CA3AF"
+COLOR_FAILURE = "#B91C1C"
+
+# The five locked results metrics, in the order they are rendered.
+RESULTS_METRIC_ROWS: List[Tuple[str, str]] = [
+    ("revenue", "Revenue"),
+    ("underlying_npat", "Underlying NPAT"),
+    ("underlying_eps", "Underlying EPS"),
+    ("dividend_ordinary", "Ordinary dividend"),
+    ("operating_cash_flow", "Operating cash flow"),
+]
+
+# Rendered prefix per reporting currency. Values are never converted — the
+# prefix only makes the reporting currency unmistakable (US$4,180m can't be
+# misread as A$4,180m).
+CURRENCY_PREFIXES = {
+    "AUD": "A$", "USD": "US$", "NZD": "NZ$", "SGD": "S$",
+    "HKD": "HK$", "CAD": "C$", "GBP": "£", "EUR": "€", "JPY": "¥",
+}
+
+PERIOD_TYPE_LABELS = {
+    "full_year": "Full-year",
+    "half_year": "Half-year",
+    "quarterly": "Quarterly",
+    "other": "Results",
+}
+
+# deep_results_analysis outcome, carried on the analysis dict as "_status".
+RESULTS_STATUS_OK = "ok"
+RESULTS_STATUS_SKIPPED = "skipped"
+RESULTS_STATUS_FAILED = "failed"
+RESULTS_STATUS_PARSE_ERROR = "parse_error"
+RESULTS_STATUS_NO_CONTENT = "no_content"
+
+# Remuneration card — quick-take rows rendered in the email above the
+# summary. Same "locked shape" idea as RESULTS_METRIC_ROWS: the LLM emits
+# these keys and only these keys under "quick_take" so the card is
+# comparable across companies. "shareholder_dilution" reads "n/a" for
+# on-market and cash-settled plans by design.
+REMUNERATION_QUICK_TAKE_ROWS: List[Tuple[str, str]] = [
+    ("funding",              "Funding"),
+    ("quantum",              "Quantum"),
+    ("hurdles",              "Hurdles"),
+    ("vesting_period",       "Vesting"),
+    ("shareholder_dilution", "Dilution"),
+]
+
+# Card colour for a strongly-aligned plan (green), a mixed plan (amber) and
+# a misaligned one (red). Matches the change-colour ladder above but is
+# indexed off the LLM's "verdict" / "alignment_score" instead of a sign.
+COLOR_ALIGN_GOOD = "#15803D"
+COLOR_ALIGN_MIXED = "#B45309"
+COLOR_ALIGN_BAD = "#B91C1C"
+# Neutral/routine raise — a calmer blue, distinct from the green/amber/red
+# judgement pills so "nothing alarming here" doesn't read as a thumbs-up.
+COLOR_ALIGN_NEUTRAL = "#1D4ED8"
+
+# Fundraising card — the locked quick-take rows rendered above the summary,
+# same "comparable across companies" idea as RESULTS_METRIC_ROWS. One short
+# value each; anything the announcement doesn't disclose reads "not disclosed
+# in this announcement" (never a guessed balance-sheet figure).
+FUNDRAISE_QUICK_TAKE_ROWS: List[Tuple[str, str]] = [
+    ("instrument",       "Type"),
+    ("amount",           "Amount"),
+    ("structure",        "Structure"),
+    ("use_of_proceeds",  "Use of funds"),
+    ("cost_or_dilution", "Cost / dilution"),
+    ("balance_sheet",    "Leverage"),
+]
+
+# Trading update card — a short table, not a wall of text. Locked rows, same
+# "comparable across companies" idea as the other quick-take schemas.
+TRADING_UPDATE_QUICK_TAKE_ROWS: List[Tuple[str, str]] = [
+    ("headline_metric", "Headline number"),
+    ("guidance_call",   "vs Guidance"),
+    ("key_driver",      "Driver"),
+    ("balance_sheet",   "Balance sheet"),
+]
+
+# Appendix 4C / 5B quarterly cash flow card — operating/investing/financing
+# cash flow this quarter (the locked rows below), plus cash position and the
+# Question 8 runway figure rendered as two extra rows in the builder.
+QUARTERLY_4C_CASHFLOW_ROWS: List[Tuple[str, str]] = [
+    ("operating", "Operating cash flow"),
+    ("investing", "Investing cash flow"),
+    ("financing", "Financing cash flow"),
+]
+
+# Acquisition card — same locked-rows idea again. AHC's CareTech + RTM
+# acquisitions (2026-10-16) were the two-deals-in-one-morning case that made
+# the old free-text wall of prose unreadable in the email.
+ACQUISITION_QUICK_TAKE_ROWS: List[Tuple[str, str]] = [
+    ("target",        "Target"),
+    ("consideration",  "Consideration"),
+    ("multiple",       "Multiple"),
+    ("funding",        "Funding"),
+    ("strategic_fit",  "Strategic fit"),
+]
+
+_JOKES_FILE = Path(__file__).resolve().parent / "config" / "daily_jokes.txt"
+
+
+def log(msg: str):
+    print(f"[agent] {msg}", flush=True)
+
+
+def now_sgt() -> dt.datetime:
+    return dt.datetime.utcnow() + dt.timedelta(hours=8)
+
+
+def today_sgt_date() -> dt.date:
+    return now_sgt().date()
+
+
+def cutoff_dt_sgt(hours_back: int) -> dt.datetime:
+    return now_sgt() - dt.timedelta(hours=hours_back)
+
+
+def announcement_key(ticker: str, url: str) -> str:
+    raw = f"{ticker}|{url}".encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()
+
+
+def load_seen_state(path: Path) -> Dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        log(f"Could not read seen state file: {e}")
+        return {}
+    if isinstance(data, list):
+        now_iso = now_sgt().isoformat(timespec="seconds")
+        return {k: now_iso for k in data if isinstance(k, str)}
+    if not isinstance(data, dict):
+        return {}
+    state: Dict[str, str] = {}
+    for key, seen_iso in data.items():
+        if isinstance(key, str) and isinstance(seen_iso, str):
+            state[key] = seen_iso
+    return state
+
+
+def prune_seen_state(state: Dict[str, str], retention_hours: int) -> Dict[str, str]:
+    cutoff = now_sgt() - dt.timedelta(hours=retention_hours)
+    out: Dict[str, str] = {}
+    for key, seen_iso in state.items():
+        try:
+            seen_dt = dt.datetime.fromisoformat(seen_iso)
+        except Exception:
+            continue
+        if seen_dt >= cutoff:
+            out[key] = seen_iso
+    return out
+
+
+def save_seen_state(path: Path, state: Dict[str, str]) -> None:
+    path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _get_daily_joke() -> str:
+    """Return a deterministic joke-of-the-day from the local jokes file.
+
+    No network calls — reads config/daily_jokes.txt and rotates by date so
+    the same joke shows all day. Returns "" (never raises) if the file is
+    missing or empty.
+    """
+    try:
+        lines = [
+            ln.strip() for ln in _JOKES_FILE.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+    except Exception:
+        return ""
+    if not lines:
+        return ""
+    return lines[today_sgt_date().toordinal() % len(lines)]
+
+
+def send_email(
+    subject: str,
+    body_text: str,
+    body_html: Optional[str] = None,
+    to_addr: Optional[str] = None,
+    attachments: Optional[List[Path]] = None,
+):
+    """Send the digest. Raises if email env is missing or SMTP fails, so
+    ``bob.json`` is never written for a digest nobody received."""
+    shared_send_email(
+        subject,
+        body_text,
+        body_html,
+        attachments=[p for p in attachments or [] if p and p.exists()],
+        force_type=("application", "pdf"),
+        log_details=True,
+        to_addr=to_addr,
+        raise_on_error=True,
+        log=log,
+        log_prefix="[Email]",
+    )
+
+
+def read_tickers() -> Tuple[List[str], List[str]]:
+    with open("tickers.yaml", "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("asx", []), data.get("lse", [])
+
+
+def http_session() -> requests.Session:
+    return browser_session(accept="application/json, text/html, */*")
+
+
+def is_price_sensitive_title(title: str) -> bool:
+    t = title.lower()
+    keywords = [
+        "appendix 4e", "appendix 4d", "results", "half year", "half-year",
+        "full year", "annual report", "interim financial report", "financial report",
+        "trading update", "guidance", "earnings", "profit", "revenue", "eps",
+        "ebit", "ebitda", "investor presentation", "presentation",
+        "placement", "rights issue", "entitlement", "spp", "capital raising",
+        "issue of shares", "convertible", "notes", "bond", "debt facility",
+        "refinance", "term loan", "facility",
+        "acquisition", "acquire", "merger", "scheme", "takeover", "transaction",
+        "contract", "award", "termination", "litigation", "regulatory",
+        "material", "strategic", "halt", "suspension",
+        "ceo", "cfo", "resignation", "retirement",
+        "quarterly", "quarterly activities", "quarterly report", "appendix 4c", "appendix 5b",
+    ]
+    return any(k in t for k in keywords)
+
+
+# Results-title matching is pattern-based, not a fixed phrase list. The list
+# version missed Brambles' FY26 release entirely: BXB styles its headlines
+# "2026 Full-Year Result presentation" (singular "Result"), "Full Year
+# Statutory Accounts" and "2026 Full-Year ASX & Media Release", none of which
+# contain any of the literal phrases the list looked for. Five BXB documents
+# were downloaded and none reached deep_results_analysis. Anything that pairs
+# a reporting period with a results-document noun now matches.
+_RESULTS_TITLE_HARD_NO = (
+    "transcript", "webcast", "conference call", "investor call",
+    # Meeting/voting "results" are not financial results.
+    "results of meeting", "result of meeting",
+    "results of annual general meeting", "results of general meeting",
+    "voting results", "proxy",
+    "notice of meeting", "notice of annual general meeting",
+)
+
+# A quarter-only "results" title (Q1/Q2/Q3) is never a full HY/FY financial
+# statement — ASX names report HY/FY under Appendix 4D/4E; a "Q1 FY27 results
+# briefing" is at most a quarterly trading update, or an administrative
+# notice that one is coming (TRADING_UPDATE handles both — see
+# deep_trading_update_memo's has_data gate). MSV's actual title, "FY27 Q1
+# results briefing", matched the generic results-briefing pattern below and
+# ran the full RESULTS_HY_FY card over a document that was nothing but a
+# notice that the real report would be released four days later — producing
+# a five-metric table of nothing but "n/a". Q4 is deliberately left out of
+# this exclusion: some reporters' Q4 release doubles as the full-year result.
+_RESULTS_TITLE_HARD_NO_PATTERNS = tuple(re.compile(p) for p in (
+    r"\bq[1-3]\b",
+    r"\b[1-3]q\b",
+    r"\b(?:first|second|third)\s+quarter\b",
+))
+
+_RESULTS_TITLE_PATTERNS = tuple(re.compile(p) for p in (
+    # Appendix 4D (half-year) / 4E (preliminary final). Not 4C, 4G, etc.
+    r"appendix\s*4[de]\b",
+    r"preliminary\s+final\s+report",
+    r"\bstatutory\s+accounts?\b",
+    r"\bfinancial\s+report\b",
+    r"\bannual\s+report\b",
+    # "Half-Year Report", "Full Year Financial Results", "Annual Accounts"
+    r"\b(?:annual|interim|half[\s\-]?year|full[\s\-]?year)\s+"
+    r"(?:financial\s+)?(?:report|results?|accounts?)\b",
+    # "Results Announcement", "Result presentation", "Results Release"
+    r"\bresults?\s+(?:announcement|presentation|release|briefing|report)\b",
+    # Period first: "2026 Full-Year ASX & Media Release", "Full-Year Result …"
+    r"(?:half|full)[\s\-]?year[\s\-\w&]*"
+    r"\b(?:results?|report|accounts?|release|presentation)\b",
+    # "FY26 Full Year Results", "1H FY2026 Results", "1HFY26 Results"
+    r"\b(?:[12]h\s?)?(?:fy|hy)\s?\d{2,4}\b[\s\-\w&]*\bresults?\b",
+    # Reverse order: "Results — 1H FY26", "Report for the Full Year"
+    r"\bresults?\b[\s\-\w&]*\b(?:(?:half|full)[\s\-]?year|(?:[12]h\s?)?fy\s?\d{2,4})\b",
+))
+
+
+def looks_like_results_title(title: str) -> bool:
+    t = title.lower()
+    if any(x in t for x in _RESULTS_TITLE_HARD_NO):
+        return False
+    if any(p.search(t) for p in _RESULTS_TITLE_HARD_NO_PATTERNS):
+        return False
+    return any(p.search(t) for p in _RESULTS_TITLE_PATTERNS)
+
+
+# Remuneration / employee-share-plan classifier. Fires when a title clearly
+# names a new or amended plan document, or an incentive plan whose rules the
+# investor should read side-by-side with the previous version — the exact
+# case where reading the whole plan by hand is what takes time.
+#
+# HARD NOs: things that mention "share plan" or "remuneration" but are NOT a
+# plan-change document — a Change of Director's Interest Notice reports one
+# grant under an existing plan, a Notice of Meeting is a wrapper (the
+# remuneration report inside the AR is picked up under RESULTS_HY_FY),
+# a Chairman's/CEO address quoting FY remuneration is commentary, and the
+# response-to-price-query template mentions "employee share scheme" as an
+# example of things the company hasn't done.
+_REMUNERATION_TITLE_HARD_NO = (
+    "change of director",             # Appendix 3Y grant notice
+    "change in director",
+    "final director",                 # Appendix 3Z
+    "director's interest",
+    "directors interest",
+    "initial director's interest",    # Appendix 3X
+    "appendix 3x", "appendix 3y", "appendix 3z",
+    "response to asx",                # price/aware-query response templates
+    "response to price query",
+    "response to aware query",
+    "chairman's address", "chairmans address", "ceo address",
+    "annual general meeting presentation",
+    "notice of annual general meeting",
+    "notice of general meeting",
+    "notice of meeting",
+    "results of meeting",
+    "results of annual general meeting",
+    "voting results", "proxy",
+    "trading window",
+    "cleansing notice",
+    "annual report",                  # remuneration report lives inside — captured by RESULTS_HY_FY
+    "webcast", "transcript", "conference call",
+)
+
+# A separator that tolerates the punctuation ASX headlines actually contain
+# between the trigger word and the plan noun — em dash (U+2014), en dash
+# (U+2013), colons, brackets, ampersands, digits, whitespace. Bounded to 60
+# characters so it can never span across two unrelated ideas in a long title.
+_REM_SEP = r"[\s\-–—:()&\w]{0,60}"
+
+# The plan-noun alternatives — long enough to want naming, and used in
+# both the trigger-first and plan-noun-first patterns below. Every
+# variant that appears on the ASX in practice belongs here: the missing
+# "Employee Share INCENTIVE Plan" pattern is what let AHC's real title
+# ("Amendments to Employee Share Incentive Plan") fall through to FYI on
+# the first run.
+_REM_PLAN_NOUNS = (
+    r"employee\s+share\s+(?:incentive\s+)?(?:plan|scheme)|"
+    r"share\s+incentive\s+(?:plan|scheme)|"
+    r"esp|espp|"
+    r"(?:long[\s\-]?term|short[\s\-]?term)\s+incentive(?:\s+plan)?|ltip?|stip?|"
+    r"performance\s+rights?(?:\s+plan)?|prp|"
+    r"executive\s+(?:incentive|equity)\s+plan|eip|"
+    r"share\s+option\s+plan|option\s+plan|"
+    r"employee\s+equity\s+plan|matching\s+plan|deferred\s+share\s+plan|"
+    r"restricted\s+share\s+plan|equity\s+incentive\s+plan|"
+    r"remuneration\s+(?:framework|policy|structure)"
+)
+
+_REMUNERATION_TITLE_PATTERNS = tuple(re.compile(p) for p in (
+    # Amended / amendment(s) / new / updated / revised / adopted + plan noun.
+    # "amend(?:ed|ment)s?" catches "amend", "amended", "amendment",
+    # "amendments" — the last was the exact word AHC used and my first
+    # pattern missed it, so the plural is now explicit here.
+    r"\b(?:amend(?:ed|ment)s?|new|revised|updated|adoption|adopts|adopting|"
+    r"replacement|refresh(?:ed)?)\b" + _REM_SEP +
+    r"\b(?:" + _REM_PLAN_NOUNS + r")\b",
+    # Same list, plan-noun-first ("Employee Share Plan — Amendment").
+    r"\b(?:" + _REM_PLAN_NOUNS + r")\b" + _REM_SEP +
+    r"\b(?:amend(?:ed|ment)s?|new\s+rules|updated|revised|adoption|adopted|"
+    r"refresh(?:ed)?|change|changes|replace(?:d|ment)?|rules)\b",
+    # Explicit "Rules of" a plan (companies file the rulebook itself).
+    r"\brules\s+of\s+the\b" + _REM_SEP +
+    r"\b(?:" + _REM_PLAN_NOUNS + r")\b",
+    # Explanatory memorandum for a plan being put to shareholders.
+    r"\bexplanatory\s+(?:memorandum|statement)\b" + _REM_SEP +
+    r"\b(?:" + _REM_PLAN_NOUNS + r"|share\s+plan|incentive\s+plan|remuneration)\b",
+    # Approvals sought at meeting — narrower than "Notice of Meeting" itself.
+    r"\bapproval\s+of\b" + _REM_SEP +
+    r"\b(?:" + _REM_PLAN_NOUNS + r"|remuneration\s+report)\b",
+    # Standalone "Remuneration Framework/Policy" documents — the whole thing
+    # is a new/updated framework, no verb needed. The annual report's own
+    # remuneration report is caught (and excluded) by the HARD NO list, so
+    # this isn't at risk of double-catching an AR.
+    r"\b(?:executive\s+|new\s+|revised\s+|updated\s+|fy\s?\d{2,4}\s+)?"
+    r"remuneration\s+(?:framework|policy|structure)\b",
+))
+
+
+def looks_like_remuneration_title(title: str) -> bool:
+    t = title.lower()
+    if any(x in t for x in _REMUNERATION_TITLE_HARD_NO):
+        return False
+    return any(p.search(t) for p in _REMUNERATION_TITLE_PATTERNS)
+
+
+def classify_from_title_only(title: str) -> str:
+    t = title.lower()
+    if looks_like_results_title(title):
+        return "RESULTS_HY_FY"
+    if looks_like_remuneration_title(title):
+        return "REMUNERATION"
+    if any(k in t for k in ["acquisition", "acquire", "merger", "scheme", "takeover", "transaction"]):
+        return "ACQUISITION"
+    if any(k in t for k in [
+        "placement", "spp", "entitlement", "rights issue", "capital raising",
+        "convertible", "notes", "debt facility", "refinance", "term loan", "bond",
+    ]):
+        return "CAPITAL_OR_DEBT_RAISE"
+    # Appendix 4C / 5B quarterly cash flow reports get their own cash-flow-
+    # and-runway template (deep_4c_memo) — Question 8, "estimated quarters of
+    # funding available", is the single most useful output for a small-cap
+    # holder, and it is a different document shape to a narrative trading
+    # update like DRO's revenue/guidance release (which has no cash flow
+    # schedule at all). Checked before the generic TRADING_UPDATE keywords so
+    # a 4C title never falls into the wrong template.
+    if any(k in t for k in ["appendix 4c", "appendix 5b", "quarterly cash flow", "quarterly cashflow"]):
+        return "QUARTERLY_4C"
+    if any(k in t for k in [
+        "trading update", "guidance", "profit warning", "earnings revision",
+        "outlook", "forecast update", "revenue update", "downgrade", "upgrade",
+        "earnings guidance", "sales update", "quarterly", "quarterly activities",
+        "quarterly report",
+    ]):
+        return "TRADING_UPDATE"
+    if any(k in t for k in ["contract", "award", "termination"]):
+        return "CONTRACT_MATERIAL"
+    return "OTHER"
+
+
+def _parse_asx_date(released) -> Optional[dt.datetime]:
+    if released is None:
+        return None
+    if isinstance(released, (int, float)):
+        try:
+            return dt.datetime.utcfromtimestamp(float(released) / 1000.0) + dt.timedelta(hours=8)
+        except Exception:
+            return None
+    released = str(released).strip()
+    if not released:
+        return None
+    if released.isdigit() and len(released) >= 10:
+        try:
+            return dt.datetime.utcfromtimestamp(int(released) / 1000.0) + dt.timedelta(hours=8)
+        except Exception:
+            pass
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d/%m/%Y %I:%M %p",
+        "%d/%m/%Y %I:%M%p",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+    ):
+        try:
+            return dt.datetime.strptime(released, fmt)
+        except Exception:
+            continue
+    return None
+
+
+def fetch_asx_announcements(session: requests.Session, ticker: str, hours_back: int = 24) -> List[Dict]:
+    """
+    Fetch ASX announcements via the JSON API endpoint.
+    KEY FIX: the endpoint returns JSON not HTML — must use r.json() not BeautifulSoup.
+    """
+    url = (
+        "https://www.asx.com.au/asx/v2/statistics/announcements.do"
+        f"?asxCode={ticker}"
+    )
+    try:
+        r = session.get(url, timeout=30)
+        r.raise_for_status()
+        payload = r.json()
+    except Exception as e:
+        log(f"Announcement fetch failed for {ticker}: {e}")
+        return []
+
+    rows = payload.get("data", []) if isinstance(payload, dict) else []
+    if not rows:
+        log(f"No data rows for {ticker} (keys: {list(payload.keys()) if isinstance(payload, dict) else 'not a dict'})")
+        return []
+
+    cutoff = cutoff_dt_sgt(hours_back)
+    items: List[Dict] = []
+    seen_urls: set = set()
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        title = (row.get("header") or row.get("headline") or "").strip()
+        if not title:
+            continue
+        doc_url = (row.get("url") or "").strip()
+        if not doc_url:
+            doc_key = (row.get("documentKey") or "").strip()
+            if doc_key:
+                doc_url = absolute_url("/" + doc_key.lstrip("/"))
+        if not doc_url:
+            continue
+        doc_url = absolute_url(doc_url)
+        if doc_url in seen_urls:
+            continue
+        seen_urls.add(doc_url)
+
+        released = row.get("releasedDate") or row.get("issueDate") or row.get("date")
+        item_dt = _parse_asx_date(released)
+        if item_dt is None:
+            log(f"{ticker}: unparseable date '{released}' for '{title[:60]}' — including anyway")
+            item_dt = now_sgt()
+        if item_dt < cutoff:
+            continue
+
+        items.append({
+            "exchange": "ASX",
+            "ticker": ticker,
+            "date": item_dt.strftime("%d/%m/%Y"),
+            "time": item_dt.strftime("%I:%M %p"),
+            "title": title,
+            "url": doc_url,
+        })
+        if len(items) >= MAX_ANNOUNCEMENTS_PER_TICKER:
+            break
+
+    log(f"{ticker}: found {len(items)} fresh announcement(s) in last {hours_back}h")
+    return items
+
+
+def asx_pdf_url_from_item_url(url: str) -> Optional[str]:
+    if not url:
+        return None
+    low = url.lower()
+    ids_id = extract_ids_id(url)
+    if ids_id:
+        return pdf_url_for_ids_id(ids_id)
+    if "displayannouncement.do" in low:
+        return url
+    if low.endswith(".pdf"):
+        return url
+    if "asxpdf" in low:
+        return url
+    if "/pdf/" in low:
+        return url
+    return None
+
+
+def _anthropic_client():
+    """The Anthropic client for this run. Tests patch this to inject a fake."""
+    return make_client(os.environ["ANTHROPIC_API_KEY"])
+
+
+def _llm_cap_reached(counters: Dict) -> bool:
+    """Return True (and log clearly) when the run's LLM call budget is used up.
+
+    This is an intentional, expected stop — NOT an error — so it must never
+    be confused with a genuine API failure downstream.
+    """
+    if counters["llm_calls"] >= counters["MAX_LLM_CALLS_PER_RUN"]:
+        log(
+            f"LLM call skipped: call cap reached "
+            f"({counters['llm_calls']}/{counters['MAX_LLM_CALLS_PER_RUN']} this run)"
+        )
+        return True
+    return False
+
+
+# Calls at or above this many output tokens stream rather than .create():
+# the SDK refuses non-streaming requests that may take >10 minutes, which the
+# results path's 50k budget hits. The threshold and the switch itself live in
+# shared/llm.py; the alias keeps the name existing callers and tests use.
+_STREAMING_MIN_TOKENS = STREAMING_MIN_TOKENS
+
+
+def _call_anthropic(
+    system_prompt: str,
+    content: object,
+    counters: Dict,
+    max_retries: int = 1,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+) -> str:
+    """Send *content* to Claude, incrementing the run's call counter once.
+
+    Retries a genuine exception (timeout, transient 5xx, rate limit, etc.)
+    once before giving up. On final failure this logs at ERROR level and
+    returns LLM_FAILED — callers must surface this distinctly from
+    LLM_SKIPPED rather than substituting the same placeholder text for both.
+
+    *max_tokens* caps the response length. The API's ``stop_reason`` for the
+    last successful call is stashed on ``counters["last_stop_reason"]`` so a
+    caller doing JSON parsing can tell the difference between "model
+    genuinely returned bad JSON" and "model was cut off at max_tokens
+    mid-string" — those need different remedies and different failure text.
+    """
+    counters["llm_calls"] += 1
+    counters.pop("last_stop_reason", None)
+    model = os.environ.get("CLAUDE_MODEL", MODEL_DEFAULT)
+    client = _anthropic_client()
+
+    def _once() -> str:
+        resp = llm_send(
+            client,
+            model=model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": content}],
+            streaming_min_tokens=_STREAMING_MIN_TOKENS,
+        )
+        log(f"[llm] {model}: {resp.usage_line()}")
+        counters["cache_read_tokens"] = counters.get("cache_read_tokens", 0) + resp.cache_read_tokens
+        if resp.stop_reason:
+            counters["last_stop_reason"] = resp.stop_reason
+            if resp.truncated:
+                log(
+                    f"WARNING: Claude response was truncated at max_tokens={max_tokens} "
+                    f"(model={model}); downstream JSON parsing will likely fail"
+                )
+        return resp.text.strip()
+
+    def _on_retry(attempt: int, e: BaseException) -> None:
+        log(f"WARNING: Claude API call failed (attempt {attempt}/{max_retries + 1}, model={model}): {e} — retrying once")
+
+    try:
+        return call_with_retry(_once, max_retries=max_retries, on_retry=_on_retry)
+    except Exception as e:
+        log(f"ERROR: Claude API call failed after {max_retries + 1} attempt(s) (model={model}): {e}")
+        counters["last_llm_error"] = str(e)
+        return LLM_FAILED
+
+
+def llm_chat(
+    system_prompt: str,
+    user_content: str,
+    counters: Dict,
+    pdf_path: Optional[Path] = None,
+    fallback_text: str = "",
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+) -> str:
+    """Call Claude with an optional single native PDF attachment.
+
+    *fallback_text* should be the already-extracted text for *pdf_path* (if
+    any) — it's used only if the PDF turns out to be missing, malformed, or
+    too large for a native document block, so a downgrade never means
+    sending an empty/near-empty message.
+    """
+    if _llm_cap_reached(counters):
+        return LLM_SKIPPED
+    content, _used_native = build_single_pdf_content(
+        pdf_path, user_content, fallback_text=fallback_text, log=log,
+    )
+    return _call_anthropic(system_prompt, content, counters, max_tokens=max_tokens)
+
+
+def llm_chat_with_pdfs(
+    system_prompt: str,
+    user_content: str,
+    counters: Dict,
+    pdf_attachments: List[PdfAttachment],
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+) -> str:
+    """Call Claude with zero or more native PDF attachments (e.g. the primary
+    financial report plus the investor presentation deck, sent together so
+    both retain full table/chart fidelity instead of the deck being
+    downgraded to extracted text)."""
+    if _llm_cap_reached(counters):
+        return LLM_SKIPPED
+    batch = build_pdf_attachments(pdf_attachments, log=log)
+    if batch.any_native:
+        content: object = list(batch.document_blocks) + [
+            {"type": "text", "text": user_content[:50_000]}
+        ]
+    else:
+        prefix = "\n\n".join(batch.fallback_sections)
+        content = (f"{prefix}\n\n{user_content}" if prefix else user_content)[:100_000]
+    return _call_anthropic(system_prompt, content, counters, max_tokens=max_tokens)
+
+
+def download_pdf_requests(session: requests.Session, url: str, out_path: Path) -> bool:
+    r = session.get(url, timeout=REQUESTS_PDF_TIMEOUT_SECS, allow_redirects=True)
+    r.raise_for_status()
+    if r.content[:4] != b"%PDF":
+        return False
+    out_path.write_bytes(r.content)
+    return True
+
+
+def extract_pdf_text(pdf_path: Path) -> str:
+    try:
+        reader = PdfReader(str(pdf_path))
+        parts = []
+        for page in reader.pages:
+            t = page.extract_text() or ""
+            if t.strip():
+                parts.append(t)
+        return "\n\n".join(parts).strip()
+    except Exception:
+        return ""
+
+
+def fetch_html_text(session: requests.Session, url: str) -> str:
+    r = session.get(url, timeout=HTML_TIMEOUT_SECS, allow_redirects=True)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+        tag.decompose()
+    text = soup.get_text("\n", strip=True)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text[:80_000]
+
+
+def looks_like_asx_access_gate(text: str) -> bool:
+    """ASX's terms-of-use interstitial instead of the announcement.
+
+    The "Agree and proceed" button is often stripped when the page is
+    reduced to text (it sits in a <header>/<form>), so an "Access to this
+    site" heading at the top of the text is enough on its own. Only the top
+    of the text is checked for that, so a long report that mentions the
+    phrase somewhere in its body is not mistaken for the gate.
+    """
+    t = (text or "").lower()
+    if "access to this site" in t[:500]:
+        return True
+    return ("access to this site" in t and "agree and proceed" in t) or (
+        "general conditions" in t and "agree and proceed" in t
+    )
+
+
+def is_meaningful_text(text: str, min_chars: int = 1200) -> bool:
+    if not text:
+        return False
+    t = text.strip()
+    if len(t) < min_chars:
+        return False
+    if looks_like_asx_access_gate(t):
+        return False
+    return True
+
+
+def fetch_announcement_text(
+    session: requests.Session,
+    url: str,
+    pdf_url: Optional[str],
+    pdf_path: Path,
+    counters: Dict,
+) -> Tuple[str, bool]:
+    got_pdf = False
+    text = ""
+    if pdf_url and counters["pdfs_downloaded"] >= counters["MAX_PDFS_PER_RUN"]:
+        log(
+            f"PDF download skipped: run cap reached "
+            f"({counters['pdfs_downloaded']}/{counters['MAX_PDFS_PER_RUN']}) — {url}"
+        )
+    if pdf_url and counters["pdfs_downloaded"] < counters["MAX_PDFS_PER_RUN"]:
+        try:
+            got_pdf = download_pdf_requests(session, pdf_url, pdf_path)
+        except Exception:
+            got_pdf = False
+        if not got_pdf:
+            try:
+                got_pdf = asyncio.run(fetch_pdf_with_playwright(pdf_url, pdf_path))
+            except Exception as e:
+                log(f"Playwright fetch failed: {e}")
+                got_pdf = False
+    if got_pdf:
+        counters["pdfs_downloaded"] += 1
+        text = extract_pdf_text(pdf_path) or ""
+        return text, True
+    log(f"PDF fetch failed for {url} — falling back to HTML text")
+    try:
+        html_text = fetch_html_text(session, url)
+        if looks_like_asx_access_gate(html_text):
+            return "", False
+        return html_text, False
+    except Exception:
+        return "", False
+
+
+def _linkify_urls(text: str) -> str:
+    escaped = htmlmod.escape(text)
+    return re.sub(
+        r"(https?://[^\s<]+)",
+        r"<a href='\1' style='color:#93C5FD; text-decoration:underline;'>\1</a>",
+        escaped,
+    )
+
+
+def _html_block(b: str) -> str:
+    return (
+        "<div style='margin:12px 0; padding:12px; background:"
+        + COLOR_PANEL
+        + "; border-radius:10px; white-space:pre-wrap; line-height:1.5; font-size:14px; color:"
+        + COLOR_TEXT
+        + ";'>"
+        + _linkify_urls(b)
+        + "</div>"
+    )
+
+
+def _block_text(block) -> str:
+    """Digest blocks are either a plain string (rendered as escaped pre-wrap
+    text) or a {"text": ..., "html": ...} pair for blocks that build their own
+    email-safe HTML, e.g. the results card."""
+    if isinstance(block, dict):
+        return str(block.get("text", "") or "")
+    return str(block or "")
+
+
+def _block_html(block) -> str:
+    if isinstance(block, dict) and block.get("html"):
+        return str(block["html"])
+    return _html_block(_block_text(block))
+
+
+def _html_section(title: str, color: str, blocks: List) -> str:
+    if not blocks:
+        return ""
+    items_html = "".join(_block_html(b) for b in blocks)
+    return f"""
+    <div style="margin:18px 0;">
+      <div style="padding:10px 12px; background:{color}; color:#0B1220; font-weight:800; border-radius:10px; letter-spacing:0.6px;">
+        {htmlmod.escape(title)}
+      </div>
+      {items_html}
+    </div>
+    """
+
+
+def build_email(
+    high_impact: List,
+    material: List,
+    fyi: List,
+) -> Tuple[str, str]:
+    no_announcements = not high_impact and not material and not fyi
+    no_announcements_msg = f"No reportable announcements found in the last {HOURS_BACK} hours."
+    if no_announcements:
+        joke = _get_daily_joke()
+        if joke:
+            no_announcements_msg += f"\nJoke of the day: {joke}"
+
+    lines: List[str] = []
+    lines.append(f"{BOB_NAME} {VERSION_LABEL}")
+    lines.append("=" * len(BOB_NAME))
+    lines.append(f"Daily Announcements Digest — last {HOURS_BACK} hours — {today_sgt_date().isoformat()} (SGT)")
+    lines.append(f"Run caps: MAX_PDFS={MAX_PDFS_PER_RUN}, MAX_LLM_CALLS={MAX_LLM_CALLS_PER_RUN}, MAX_PER_TICKER={MAX_ANNOUNCEMENTS_PER_TICKER}")
+    lines.append("")
+    if high_impact:
+        lines.append("HIGH IMPACT")
+        lines.append("-" * 60)
+        lines.extend(_block_text(b) for b in high_impact)
+        lines.append("")
+    if material:
+        lines.append("MATERIAL")
+        lines.append("-" * 60)
+        lines.extend(_block_text(b) for b in material)
+        lines.append("")
+    if fyi:
+        lines.append("FYI (ALL ANNOUNCEMENTS)")
+        lines.append("-" * 60)
+        lines.extend(_block_text(b) for b in fyi)
+        lines.append("")
+    if no_announcements:
+        lines.append(no_announcements_msg)
+    body_text = "\n".join(lines)
+
+    header_html = f"""
+    <div style="padding:18px; background:{COLOR_BG}; color:{COLOR_TEXT}; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif;">
+      <div style="font-size:22px; font-weight:900; margin-bottom:6px;">{htmlmod.escape(f"{BOB_NAME} {VERSION_LABEL}")}</div>
+      <div style="opacity:0.9; font-size:14px; margin-bottom:10px;">
+        Daily Announcements Digest — last {HOURS_BACK} hours — {today_sgt_date().isoformat()} (SGT)
+      </div>
+      <div style="opacity:0.75; font-size:12px; margin-bottom:18px;">
+        Run caps: MAX_PDFS={MAX_PDFS_PER_RUN}, MAX_LLM_CALLS={MAX_LLM_CALLS_PER_RUN}, MAX_PER_TICKER={MAX_ANNOUNCEMENTS_PER_TICKER}
+        &nbsp;|&nbsp; AI: Anthropic {os.environ.get("CLAUDE_MODEL", MODEL_DEFAULT)}
+      </div>
+    """
+    sections_html = ""
+    sections_html += _html_section("HIGH IMPACT", COLOR_HIGH_IMPACT, high_impact)
+    sections_html += _html_section("MATERIAL", COLOR_MATERIAL, material)
+    sections_html += _html_section("FYI (ALL ANNOUNCEMENTS)", COLOR_FYI, fyi)
+    if no_announcements:
+        sections_html += f"""
+        <div style="margin:18px 0; padding:12px; background:{COLOR_PANEL}; border-radius:10px; color:{COLOR_TEXT};">
+          {htmlmod.escape(no_announcements_msg).replace(chr(10), "<br>")}
+        </div>
+        """
+    footer_html = "</div>"
+    body_html = header_html + sections_html + footer_html
+    return body_text, body_html
+
+
+def summarise_headline_two_lines(ticker: str, title: str) -> str:
+    line1 = f"{ticker}: {title[:160]}"
+    line2 = "So what: FYI — open link if you want the details."
+    return line1 + "\n" + line2
+
+
+def summarise_two_lines_llm(ticker: str, title: str, text: str, counters: Dict) -> Optional[dict]:
+    if not is_meaningful_text(text, min_chars=600):
+        return None
+    user = f"Ticker: {ticker}\nTitle: {title}\n\nText:\n{text}"
+    out = llm_chat(DEFAULT_2LINE_PROMPT, user, counters)
+    if out == LLM_SKIPPED:
+        return {
+            "what_happened": f"{ticker}: {title[:160]}",
+            "so_what": LLM_SKIP_MESSAGE,
+        }
+    if out == LLM_FAILED:
+        marker = _failed_marker("so_what", counters)
+        return {
+            "what_happened": f"{ticker}: {title[:160]}",
+            "so_what": marker["so_what"],
+        }
+    parsed = _parse_analysis_json(out)
+    if parsed and "what_happened" in parsed:
+        return parsed
+    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    if len(lines) >= 2:
+        return {"what_happened": lines[0], "so_what": lines[1]}
+    if len(lines) == 1:
+        return {"what_happened": lines[0], "so_what": "Open link for details."}
+    return None
+
+
+def _prettify_analysis_text(text: str, width: int = 140) -> str:
+    if not text:
+        return ""
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
+    wrapped: List[str] = []
+    for block in blocks:
+        raw = re.sub(r"\s+", " ", block).strip()
+        if raw:
+            wrapped.append(textwrap.fill(raw, width=width))
+    return "\n\n".join(wrapped)
+
+
+def _sanitise_json_string_bodies(text: str) -> str:
+    """Escape what a model most often gets wrong *inside* a JSON string.
+
+    ``full_analysis`` is a multi-thousand-character markdown blob living in a
+    single JSON string, and a long generation only has to slip once for
+    ``json.loads`` to reject the whole object. The two recurring slips are a
+    raw control character (a literal newline instead of ``\\n``) and an
+    invalid escape (``\\%``, ``\\$`` — legal in markdown, illegal in JSON).
+    Both are recoverable without losing a single character of content, which
+    is what separates this from bracket-balancing a truncated response.
+    """
+    out: List[str] = []
+    in_string = False
+    escaped = False
+    control_map = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    for ch in text:
+        if escaped:
+            if ch in '"\\/bfnrtu':
+                out.append(ch)
+            else:
+                # Invalid escape: drop the backslash, keep the character.
+                out.pop()
+                out.append(ch)
+            escaped = False
+            continue
+        if in_string and ch == "\\":
+            out.append(ch)
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string and ch in control_map:
+            out.append(control_map[ch])
+            continue
+        if in_string and ord(ch) < 0x20:
+            out.append("\\u%04x" % ord(ch))
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def _close_unbalanced_json(text: str) -> Optional[str]:
+    """Close unclosed brackets/braces, or None if the damage is too broad.
+
+    ONLY valid for output that is complete but malformed — a stray missing
+    brace on a response the model finished writing. Never call this on a
+    response the API truncated at max_tokens: balancing brackets there yields
+    an object whose ``full_analysis`` stops mid-sentence and the card renders
+    as a clean result. A half-broken digest must never look like a clean one
+    (see CLAUDE.md), so truncation stays a parse_error.
+    """
+    if not text:
+        return None
+    open_braces = text.count("{") - text.count("}")
+    open_brackets = text.count("[") - text.count("]")
+    if open_braces < 0 or open_brackets < 0 or open_braces > 10:
+        return None
+    if not open_braces and not open_brackets:
+        return None
+    return text.strip() + ("]" * open_brackets) + ("}" * open_braces)
+
+
+def _parse_analysis_json(text: str, allow_repair: bool = True) -> Optional[dict]:
+    """Parse structured JSON from LLM output.
+
+    Tries progressively harder, cheapest first, and every step short of the
+    last preserves the model's content exactly:
+
+      1. straight parse (after stripping markdown code fences)
+      2. the outermost ``{...}`` span, ignoring any prose either side
+      3. the same span with string bodies sanitised (control chars, bad
+         escapes) and trailing commas dropped
+      4. that, plus unclosed brackets closed — *only* when ``allow_repair``
+
+    *allow_repair* must be False when the API reported the response was cut
+    off at max_tokens; see ``_close_unbalanced_json``.
+    """
+    if not text or text in (LLM_SKIPPED, LLM_FAILED):
+        return None
+
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r"\s*```\s*$", "", cleaned.strip(), flags=re.MULTILINE)
+    cleaned = cleaned.strip()
+
+    def _load(candidate: str) -> Optional[dict]:
+        try:
+            result = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return result if isinstance(result, dict) else None
+
+    parsed = _load(cleaned)
+    if parsed is not None:
+        return parsed
+
+    m = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if m:
+        span = m.group()
+    elif allow_repair and "{" in cleaned:
+        # No closing brace anywhere: the object is unclosed rather than
+        # merely malformed. Worth one repair attempt, but only on a response
+        # the API did not report as truncated.
+        span = cleaned[cleaned.index("{"):]
+    else:
+        return None
+
+    parsed = _load(span)
+    if parsed is not None:
+        return parsed
+
+    # Content-preserving repairs: nothing the model wrote is discarded.
+    repaired = _sanitise_json_string_bodies(span)
+    repaired = re.sub(r",(\s*[}\]])", r"\1", repaired)
+    parsed = _load(repaired)
+    if parsed is not None:
+        log("[parse] Recovered JSON after escaping string bodies")
+        return parsed
+
+    if allow_repair:
+        closed = _close_unbalanced_json(repaired)
+        if closed:
+            parsed = _load(closed)
+            if parsed is not None:
+                log("[parse] Recovered JSON by closing unclosed brackets")
+                return parsed
+    return None
+
+
+def _analysis_to_email_text(analysis: dict, kind: str) -> str:
+    """Render a structured analysis dict as readable plain text for the email."""
+    if not analysis:
+        return "No analysis available."
+
+    lines: List[str] = []
+
+    if kind == "results":
+        if "executive_summary" in analysis:
+            lines.append("EXECUTIVE SUMMARY:")
+            for b in analysis.get("executive_summary", []):
+                lines.append(f"  • {b}")
+        if "key_numbers" in analysis:
+            lines.append("\nKEY NUMBERS:")
+            labels = {
+                "revenue": "Revenue", "ebitda_margin": "EBITDA margin",
+                "npat_statutory": "NPAT (statutory)", "npat_underlying": "NPAT (underlying)",
+                "eps": "EPS", "operating_cashflow": "Op. cash flow",
+                "free_cashflow": "Free cash flow", "net_debt_cash": "Net debt/cash",
+            }
+            for k, v in analysis["key_numbers"].items():
+                lines.append(f"  {labels.get(k, k)}: {v}")
+        if analysis.get("quality_of_earnings"):
+            lines.append(f"\nQUALITY OF EARNINGS:\n{analysis['quality_of_earnings']}")
+        if analysis.get("management_framing"):
+            lines.append(f"\nMANAGEMENT FRAMING:\n{analysis['management_framing']}")
+        if analysis.get("positives"):
+            lines.append("\nPOSITIVES:")
+            for p in analysis["positives"]:
+                lines.append(f"  ✓ {p}")
+        if analysis.get("negatives"):
+            lines.append("\nNEGATIVES / RED FLAGS:")
+            for n in analysis["negatives"]:
+                lines.append(f"  ✗ {n}")
+        bl = analysis.get("bottom_line", {})
+        if isinstance(bl, dict):
+            lines.append("\nBOTTOM LINE:")
+            if bl.get("bull"):
+                lines.append(f"  Bull: {bl['bull']}")
+            if bl.get("bear"):
+                lines.append(f"  Bear: {bl['bear']}")
+            if bl.get("what_changes_mind"):
+                lines.append(f"  Watch: {bl['what_changes_mind']}")
+        elif bl:
+            lines.append(f"\nBOTTOM LINE: {bl}")
+
+    elif kind == "acquisition":
+        for key, label in [
+            ("deal_summary", "DEAL SUMMARY"), ("what_they_bought", "WHAT THEY BOUGHT"),
+            ("price_check", "PRICE CHECK"), ("strategic_fit", "STRATEGIC FIT"),
+            ("integration_risk", "INTEGRATION RISK"), ("balance_sheet_impact", "BALANCE SHEET"),
+        ]:
+            if analysis.get(key):
+                lines.append(f"\n{label}:\n{analysis[key]}")
+        if analysis.get("red_flags"):
+            lines.append("\nRED FLAGS:")
+            for f in analysis["red_flags"]:
+                lines.append(f"  ⚠ {f}")
+        bl = analysis.get("bottom_line", {})
+        if isinstance(bl, dict):
+            lines.append("\nBOTTOM LINE:")
+            if bl.get("bull"):
+                lines.append(f"  Bull: {bl['bull']}")
+            if bl.get("bear"):
+                lines.append(f"  Bear: {bl['bear']}")
+            if bl.get("key_questions"):
+                lines.append("  Key questions:")
+                for q in bl["key_questions"]:
+                    lines.append(f"    → {q}")
+        elif bl:
+            lines.append(f"\nBOTTOM LINE: {bl}")
+
+    elif kind in ("capital", "trading_update", "price_sensitive"):
+        list_keys = {"key_questions", "risks_questions", "red_flags"}
+        for key, value in analysis.items():
+            if not value:
+                continue
+            label = key.replace("_", " ").upper()
+            if key in list_keys:
+                lines.append(f"\n{label}:")
+                for item in (value if isinstance(value, list) else [value]):
+                    lines.append(f"  → {item}")
+            elif isinstance(value, dict):
+                lines.append(f"\n{label}:")
+                for k, v in value.items():
+                    lines.append(f"  {k.title()}: {v}")
+            else:
+                lines.append(f"\n{label}:\n{value}")
+
+    else:
+        if analysis.get("what_happened"):
+            lines.append(analysis["what_happened"])
+        if analysis.get("so_what"):
+            lines.append(f"So what: {analysis['so_what']}")
+
+    return "\n".join(lines).strip() if lines else str(analysis)
+
+
+LLM_FAILURE_FLAG = "⚠️ Analysis failed — manual review needed"
+LLM_SKIP_MESSAGE = "Analysis skipped — LLM call-cap reached for this run (not an error)."
+RESULTS_SKIP_MESSAGE = "Analysis skipped: run-call cap reached"
+RESULTS_FAILURE_BADGE = "ANALYSIS FAILED"
+
+
+def _skip_marker(key: str, as_list: bool = False) -> dict:
+    """Placeholder for the MAX_LLM_CALLS_PER_RUN cap — expected, not an error.
+    Deliberately does not resemble real analysis output."""
+    return {key: [LLM_SKIP_MESSAGE] if as_list else LLM_SKIP_MESSAGE}
+
+
+def _failed_marker(key: str, counters: Dict, as_list: bool = False) -> dict:
+    """Placeholder for a genuine API exception — must read as a clear failure,
+    never as a terse-but-real analysis."""
+    detail = (counters.get("last_llm_error") or "").strip()
+    suffix = f" ({detail})" if detail else ""
+    message = f"{LLM_FAILURE_FLAG}{suffix}."
+    return {key: [message] if as_list else message}
+
+
+def _is_llm_failure(memo: dict) -> bool:
+    def _flagged(v: object) -> bool:
+        if isinstance(v, str):
+            return v.startswith(LLM_FAILURE_FLAG)
+        if isinstance(v, list):
+            return any(_flagged(x) for x in v)
+        return False
+
+    return any(_flagged(v) for v in memo.values())
+
+
+def build_high_impact_block(
+    ticker: str,
+    heading: str,
+    memo,
+    url: str,
+    analysed_via_pdf: bool = False,
+    kind: Optional[str] = None,
+    failed: bool = False,
+    announced: str = "",
+) -> str:
+    lines: List[str] = [f"{ticker} — {heading}"]
+    if failed:
+        lines[-1] = f"{LLM_FAILURE_FLAG} — {ticker} — {heading}"
+    elif analysed_via_pdf:
+        lines[-1] += " (analysed via PDF)"
+    if announced:
+        lines.append(_announced_text_line(announced))
+    if isinstance(memo, dict):
+        memo_text = _analysis_to_email_text(memo, kind or "generic")
+    else:
+        memo_text = memo or ""
+    lines.extend(["", "Key analysis:", _prettify_analysis_text(memo_text), "", f"Open: {url}", ""])
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Results output: five-metric table + <=5-sentence summary + two links.
+#
+# The long-form analysis no longer lives in the email — it goes to a Google
+# Doc (create_analysis_doc) and the email links to it. Everything below is
+# built for a phone: table layout, inline styles only, ~360px card.
+# ---------------------------------------------------------------------------
+
+EMAIL_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
+
+
+def _announced_text_line(announced: str) -> str:
+    """One extra plain-text line naming the announcement's actual date.
+
+    Only populated by the caller when the ticker is being processed under a
+    wide-window rerun (FORCE_RERUN_TICKERS / MANUAL_TICKER / RESULTS_TICKER),
+    where several same-ticker events can land in one run and the implicit
+    "today" a normal daily digest relies on no longer tells them apart — e.g.
+    AHC's two acquisitions, six months apart, in the same force-rerun output.
+    The normal daily run never sets this; "today" is unambiguous there.
+    """
+    return f"Announced: {announced}" if announced else ""
+
+
+def _announced_html_line(announced: str) -> str:
+    """HTML counterpart of _announced_text_line — see its docstring."""
+    if not announced:
+        return ""
+    return (
+        f'<div style="color:{COLOR_RESULTS_HEADER_SUB}; font-size:11px; margin-top:2px;">'
+        f'Announced {htmlmod.escape(announced)}</div>'
+    )
+
+
+_NA_TOKENS = {"", "n/a", "na", "n.a.", "none", "null", "not disclosed", "unknown", "-", "--", "—"}
+_NEUTRAL_CHANGE_TOKENS = _NA_TOKENS | {"n/m", "nm", "n.m.", "not meaningful", "nil"}
+
+
+def _is_na(value: object) -> bool:
+    return str(value or "").strip().lower() in _NA_TOKENS
+
+
+def _apply_currency_prefix(value: str, currency: str) -> str:
+    """Make a non-AUD reporting currency explicit without ever converting it.
+
+    A USD reporter's "$4,180m" becomes "US$4,180m" so it can't be misread as
+    Australian dollars. AUD is left as a bare "$" — it is the digest's implied
+    default and the card's context line already says "reported in A$", so
+    prefixing every row would just add noise. Values that already carry a
+    prefix are left alone.
+    """
+    code = str(currency or "").strip().upper()
+    prefix = "" if code in ("", "AUD") else CURRENCY_PREFIXES.get(code, "")
+    text = str(value or "").strip()
+    if not prefix or not text:
+        return text
+    sign = ""
+    if text[0] in "+-−":
+        sign, text = text[0], text[1:].lstrip()
+    if text.startswith("$") and not text.startswith(prefix):
+        text = prefix + text[1:]
+    return sign + text
+
+
+def _change_colour(change: str) -> str:
+    """Green for a rise, red for a fall, muted grey for n/a and n/m."""
+    text = str(change or "").strip()
+    if text.lower() in _NEUTRAL_CHANGE_TOKENS:
+        return COLOR_CHANGE_NEUTRAL
+    if text.startswith("+"):
+        return COLOR_CHANGE_UP
+    if text.startswith("-") or text.startswith("−"):
+        return COLOR_CHANGE_DOWN
+    if re.match(r"^\d", text):
+        return COLOR_CHANGE_UP
+    return COLOR_CHANGE_NEUTRAL
+
+
+def _results_metric(analysis: dict, key: str, label: str = "") -> Dict[str, str]:
+    """Normalise one metric into {value, change, sub} with "n/a" for anything
+    the model could not find. Never invents or infers a figure.
+
+    *label* is only used to drop a basis note the row label already states
+    (no "Underlying NPAT (underlying)").
+    """
+    metrics = analysis.get("metrics")
+    raw = metrics.get(key) if isinstance(metrics, dict) else None
+
+    value = change = note = basis = ""
+    if isinstance(raw, dict):
+        value = str(raw.get("value", "") or "").strip()
+        change = str(raw.get("change_pct", raw.get("change", "")) or "").strip()
+        note = str(raw.get("note", "") or "").strip()
+        basis = str(raw.get("basis", "") or "").strip()
+    elif raw not in (None, ""):
+        value = str(raw).strip()
+
+    value = _apply_currency_prefix(value, analysis.get("currency", ""))
+    if _is_na(value):
+        value = "n/a"
+    if _is_na(change):
+        change = "n/a"
+
+    sub = note
+    if not sub and basis and basis.lower() not in ("reported", "n/a", ""):
+        if basis.lower() not in label.lower():
+            sub = basis
+    return {"value": value, "change": change, "sub": sub}
+
+
+def _results_period_label(analysis: dict) -> str:
+    return str(analysis.get("period") or "").strip()
+
+
+def _results_title(ticker: str, analysis: dict) -> str:
+    period = _results_period_label(analysis)
+    return f"{ticker} — {period} results" if period else f"{ticker} — Results"
+
+
+def _results_context_line(analysis: dict) -> str:
+    """e.g. 'Full-year, reported in A$'."""
+    label = PERIOD_TYPE_LABELS.get(
+        str(analysis.get("period_type") or "").strip().lower(), "Results"
+    )
+    currency = str(analysis.get("currency") or "").strip().upper()
+    if not currency:
+        return label
+    return f"{label}, reported in {CURRENCY_PREFIXES.get(currency, currency)}"
+
+
+def _results_summary_text(analysis: dict) -> str:
+    summary = str(analysis.get("summary") or "").strip()
+    if summary:
+        return summary
+    exec_summary = analysis.get("executive_summary")
+    if isinstance(exec_summary, list) and exec_summary:
+        return " ".join(str(b).strip() for b in exec_summary if str(b).strip())
+    if isinstance(exec_summary, str):
+        return exec_summary.strip()
+    return ""
+
+
+def _results_status(analysis: dict) -> str:
+    status = str(analysis.get("_status") or "").strip()
+    if status:
+        return status
+    return RESULTS_STATUS_FAILED if _is_llm_failure(analysis) else RESULTS_STATUS_OK
+
+
+def build_results_block(
+    ticker: str,
+    analysis: dict,
+    asx_url: str,
+    doc_link: str = "",
+    doc_error: str = "",
+    announced: str = "",
+) -> Dict[str, str]:
+    """Render the RESULTS_HY_FY digest block as {"text": ..., "html": ...}.
+
+    The HTML is deliberately table-based with inline styles only: email
+    clients strip <style> blocks and mishandle flexbox/grid, so a two-column
+    table is the only reliable way to get label-left / value-right rows.
+
+    *doc_error* — if the Google Doc failed to save, this is a short
+    description of why. It is surfaced as a visible warning in the card so
+    a broken Drive stops looking like a normal quiet day. That silent-fail
+    mode is exactly how the storage-quota bug hid for weeks.
+    """
+    analysis = analysis or {}
+    status = _results_status(analysis)
+    failed = status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR)
+    title = _results_title(ticker, analysis)
+    context = _results_context_line(analysis)
+    summary = _results_summary_text(analysis) or "No summary returned."
+    rows = [(label, _results_metric(analysis, key, label)) for key, label in RESULTS_METRIC_ROWS]
+    esc = htmlmod.escape
+
+    # ---- plain text ----------------------------------------------------
+    text_lines: List[str] = []
+    if failed:
+        text_lines.append(f"{RESULTS_FAILURE_BADGE} — {title}")
+    else:
+        text_lines.append(title)
+    text_lines.append(context)
+    if announced:
+        text_lines.append(_announced_text_line(announced))
+    text_lines.append("")
+    for label, metric in rows:
+        text_lines.append(f"  {label:<22} {metric['value']:>12}   {metric['change']}")
+        if metric["sub"]:
+            # Its own line so a long note can't break the value column.
+            text_lines.append(f"      ({metric['sub']})")
+    text_lines.append("")
+    text_lines.append(summary)
+    text_lines.append("")
+    if doc_error and not doc_link:
+        text_lines.append(f"⚠️ Drive save failed — {doc_error}")
+    if doc_link:
+        text_lines.append(f"Full analysis (Google Drive): {doc_link}")
+    if asx_url:
+        text_lines.append(f"Source announcement (ASX): {asx_url}")
+    text_lines.append("")
+
+    # ---- html ----------------------------------------------------------
+    badge = RESULTS_FAILURE_BADGE if failed else "HIGH IMPACT"
+    badge_bg = COLOR_FAILURE if failed else COLOR_HIGH_IMPACT
+    badge_fg = "#FFFFFF" if failed else "#0B1220"
+
+    metric_rows_html = ""
+    for i, (label, metric) in enumerate(rows):
+        bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else COLOR_RESULTS_CARD
+        sub_html = (
+            f'<div style="font-size:11px; color:{COLOR_RESULTS_MUTED}; margin-top:2px;">'
+            f'{esc(metric["sub"])}</div>'
+            if metric["sub"] else ""
+        )
+        metric_rows_html += (
+            f'<tr>'
+            f'<td style="background:{bg}; padding:11px 14px; font-size:15px; line-height:1.3;'
+            f' color:{COLOR_RESULTS_LABEL}; font-family:{EMAIL_FONT};">{esc(label)}{sub_html}</td>'
+            f'<td align="right" style="background:{bg}; padding:11px 14px; font-size:15px;'
+            f' line-height:1.3; color:{COLOR_RESULTS_VALUE}; font-weight:700; white-space:nowrap;'
+            f' font-family:{EMAIL_FONT};">{esc(metric["value"])}'
+            f'&nbsp;&nbsp;<span style="color:{_change_colour(metric["change"])}; font-weight:700;">'
+            f'{esc(metric["change"])}</span></td>'
+            f'</tr>'
+        )
+
+    def _link_row(label: str, href: str) -> str:
+        return (
+            f'<tr><td colspan="2" style="padding:0 14px 10px 14px; font-family:{EMAIL_FONT};">'
+            f'<a href="{esc(href)}" style="display:block; padding:11px 12px; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' border:1px solid #D5E0D8; border-radius:8px; color:{COLOR_RESULTS_HEADER};'
+            f' font-size:14px; font-weight:700; text-decoration:none;">{esc(label)} &rsaquo;</a>'
+            f'</td></tr>'
+        )
+
+    warning_row = ""
+    if doc_error and not doc_link:
+        warning_row = (
+            f'<tr><td colspan="2" style="padding:10px 14px; background:#FEE2E2;'
+            f' border-top:1px solid #FCA5A5; color:{COLOR_FAILURE}; font-family:{EMAIL_FONT};'
+            f' font-size:13px; line-height:1.4;">'
+            f'<strong>⚠️ Drive save failed.</strong> The card is complete but the '
+            f'full analysis Doc was not written to Google Drive: '
+            f'<span style="font-family:monospace; font-size:12px;">{esc(doc_error)}</span>'
+            f'</td></tr>'
+        )
+
+    links_html = ""
+    if doc_link:
+        links_html += _link_row("Full analysis (Google Drive)", doc_link)
+    else:
+        # PDF is attached to the email instead of linking to Drive
+        links_html += (
+            f'<tr><td colspan="2" style="padding:10px 14px; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' color:{COLOR_RESULTS_MUTED}; font-family:{EMAIL_FONT};'
+            f' font-size:13px;">📎 Full analysis PDF attached to this email</td></tr>'
+        )
+    if asx_url:
+        links_html += _link_row("Source announcement (ASX)", asx_url)
+
+    html = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"'
+        f' style="border-collapse:collapse; margin:14px 0;"><tr><td align="center">'
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360"'
+        f' style="width:100%; max-width:360px; border-collapse:collapse;'
+        f' background:{COLOR_RESULTS_CARD}; border-radius:10px; overflow:hidden;">'
+        # header bar
+        f'<tr><td colspan="2" style="background:{COLOR_RESULTS_HEADER}; padding:13px 14px;'
+        f' font-family:{EMAIL_FONT};">'
+        f'<span style="display:inline-block; background:{badge_bg}; color:{badge_fg};'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px;">{esc(badge)}</span>'
+        f'<div style="color:#FFFFFF; font-size:17px; font-weight:800; margin-top:7px;">{esc(title)}</div>'
+        f'<div style="color:{COLOR_RESULTS_HEADER_SUB}; font-size:12px; margin-top:3px;">{esc(context)}</div>'
+        f'{_announced_html_line(announced)}'
+        f'</td></tr>'
+        # metric rows
+        f'{metric_rows_html}'
+        # summary
+        f'<tr><td colspan="2" style="padding:13px 14px; font-family:{EMAIL_FONT}; font-size:15px;'
+        f' line-height:1.5; color:{COLOR_RESULTS_VALUE}; border-top:2px solid {COLOR_RESULTS_HEADER};">'
+        f'{esc(summary)}</td></tr>'
+        # visible Drive warning if the Doc failed to write
+        f'{warning_row}'
+        # links
+        f'{links_html}'
+        f'</table></td></tr></table>'
+    )
+
+    return {"text": "\n".join(text_lines), "html": html}
+
+
+# ---------------------------------------------------------------------------
+# Markdown -> simple HTML (for the Google Doc body Drive converts to a Doc)
+# ---------------------------------------------------------------------------
+
+def _md_inline(text: str) -> str:
+    out = htmlmod.escape(text)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
+    out = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", out)
+    out = re.sub(r"`(.+?)`", r"<code>\1</code>", out)
+    out = re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', out)
+    return out
+
+
+def _md_table_to_html(rows: List[str]) -> str:
+    """Render a markdown pipe-table as a shaded HTML table."""
+    parsed: List[List[str]] = []
+    for row in rows:
+        cells = [c.strip() for c in row.strip().strip("|").split("|")]
+        if all(re.fullmatch(r":?-{2,}:?", c or "") for c in cells if c != ""):
+            continue  # separator row
+        parsed.append(cells)
+    if not parsed:
+        return ""
+    header, body = parsed[0], parsed[1:]
+    head_html = "".join(
+        f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700;'
+        f' padding:6px 9px; border:1px solid #D5E0D8;">{_md_inline(c)}</td>'
+        for c in header
+    )
+    body_html = ""
+    for i, cells in enumerate(body):
+        bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else "#FFFFFF"
+        body_html += "<tr>" + "".join(
+            f'<td style="background:{bg}; padding:6px 9px; border:1px solid #D5E0D8;">'
+            f'{_md_inline(c)}</td>' for c in cells
+        ) + "</tr>"
+    return (
+        '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;'
+        ' margin:10px 0; font-size:11pt;">'
+        f'<tr>{head_html}</tr>{body_html}</table>'
+    )
+
+
+def _markdown_to_html(md: str) -> str:
+    """Convert the model's markdown analysis to the simple HTML subset Google
+    Drive converts cleanly into a native Doc (headings, paragraphs, lists,
+    tables). Not a general markdown engine — just what the prompt emits."""
+    lines = str(md or "").replace("\r\n", "\n").split("\n")
+    parts: List[str] = []
+    para: List[str] = []
+    items: List[str] = []
+    list_tag = ""
+    table: List[str] = []
+
+    def flush_para():
+        if para:
+            parts.append(f'<p style="margin:8px 0; line-height:1.5;">{_md_inline(" ".join(para))}</p>')
+            para.clear()
+
+    def flush_list():
+        nonlocal list_tag
+        if items:
+            body = "".join(f'<li style="margin:3px 0; line-height:1.45;">{_md_inline(i)}</li>' for i in items)
+            parts.append(f'<{list_tag} style="margin:8px 0 8px 22px; padding:0;">{body}</{list_tag}>')
+            items.clear()
+            list_tag = ""
+
+    def flush_table():
+        if table:
+            parts.append(_md_table_to_html(table))
+            table.clear()
+
+    def flush_all():
+        flush_para()
+        flush_list()
+        flush_table()
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if stripped.startswith("|") and stripped.count("|") >= 2:
+            flush_para()
+            flush_list()
+            table.append(stripped)
+            continue
+        flush_table()
+
+        if not stripped:
+            flush_para()
+            flush_list()
+            continue
+
+        heading = re.match(r"^(#{1,4})\s+(.*)$", stripped)
+        if heading:
+            flush_all()
+            # The Doc's own title is the h1, so the prompt's "## Section"
+            # headings stay h2 rather than being demoted a level.
+            level = min(max(len(heading.group(1)), 2), 4)
+            size = {2: "15pt", 3: "13pt", 4: "12pt"}[level]
+            parts.append(
+                f'<h{level} style="color:{COLOR_RESULTS_HEADER}; font-size:{size};'
+                f' margin:16px 0 6px 0;">{_md_inline(heading.group(2).strip())}</h{level}>'
+            )
+            continue
+
+        bullet = re.match(r"^[-*•]\s+(.*)$", stripped)
+        if bullet:
+            flush_para()
+            if list_tag and list_tag != "ul":
+                flush_list()
+            list_tag = "ul"
+            items.append(bullet.group(1).strip())
+            continue
+
+        numbered = re.match(r"^\d+[.)]\s+(.*)$", stripped)
+        if numbered:
+            flush_para()
+            if list_tag and list_tag != "ol":
+                flush_list()
+            list_tag = "ol"
+            items.append(numbered.group(1).strip())
+            continue
+
+        if re.fullmatch(r"[-*_]{3,}", stripped):
+            flush_all()
+            parts.append('<hr style="border:0; border-top:1px solid #D5E0D8; margin:14px 0;">')
+            continue
+
+        flush_list()
+        para.append(stripped)
+
+    flush_all()
+    return "".join(parts)
+
+
+def build_analysis_doc_html(
+    ticker: str,
+    analysis: dict,
+    asx_url: str = "",
+) -> str:
+    """Build the HTML body Drive converts into the native Google Doc.
+
+    On a parse failure the raw model text is preserved verbatim so nothing is
+    lost — the Doc is the place the unusable output goes, and the email block
+    is flagged ANALYSIS FAILED rather than looking clean.
+    """
+    analysis = analysis or {}
+    status = _results_status(analysis)
+    esc = htmlmod.escape
+    title = _results_title(ticker, analysis)
+    context = _results_context_line(analysis)
+
+    parts: List[str] = [
+        f'<h1 style="color:{COLOR_RESULTS_HEADER}; font-size:19pt; margin:0 0 2px 0;">{esc(title)}</h1>',
+        f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt; margin:0 0 14px 0;">'
+        f'{esc(context)} &nbsp;|&nbsp; Generated by {esc(BOB_NAME)} {esc(VERSION_LABEL)} '
+        f'on {today_sgt_date().isoformat()} (SGT)</p>',
+    ]
+
+    if status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR):
+        parts.append(
+            f'<p style="background:#FEE2E2; border:1px solid {COLOR_FAILURE}; color:{COLOR_FAILURE};'
+            f' padding:10px 12px; font-weight:700;">{esc(RESULTS_FAILURE_BADGE)}: '
+            f'{esc(_results_summary_text(analysis))}</p>'
+        )
+    elif status == RESULTS_STATUS_SKIPPED:
+        parts.append(
+            f'<p style="background:{COLOR_RESULTS_ROW_SHADE}; padding:10px 12px;">'
+            f'{esc(RESULTS_SKIP_MESSAGE)}</p>'
+        )
+
+    if isinstance(analysis.get("metrics"), dict):
+        rows_html = ""
+        for i, (key, label) in enumerate(RESULTS_METRIC_ROWS):
+            metric = _results_metric(analysis, key, label)
+            bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else "#FFFFFF"
+            sub = f' <span style="color:{COLOR_RESULTS_MUTED}; font-size:9pt;">({esc(metric["sub"])})</span>' if metric["sub"] else ""
+            rows_html += (
+                f'<tr>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">{esc(label)}{sub}</td>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8; text-align:right;'
+                f' font-weight:700;">{esc(metric["value"])}</td>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8; text-align:right;'
+                f' color:{_change_colour(metric["change"])}; font-weight:700;">{esc(metric["change"])}</td>'
+                f'</tr>'
+            )
+        parts.append(
+            '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;'
+            ' margin:10px 0 16px 0; font-size:11pt;">'
+            f'<tr>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Metric</td>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8; text-align:right;">Value</td>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8; text-align:right;">vs pcp</td>'
+            f'</tr>{rows_html}</table>'
+        )
+
+    summary = _results_summary_text(analysis)
+    if summary:
+        parts.append(f'<h2 style="color:{COLOR_RESULTS_HEADER}; font-size:15pt; margin:16px 0 6px 0;">Summary</h2>')
+        parts.append(f'<p style="margin:8px 0; line-height:1.5;">{esc(summary)}</p>')
+
+    full_analysis = str(analysis.get("full_analysis") or "").strip()
+    if full_analysis:
+        parts.append(_markdown_to_html(full_analysis))
+
+    raw_text = str(analysis.get("_raw_text") or "").strip()
+    if raw_text:
+        parts.append(
+            f'<h2 style="color:{COLOR_FAILURE}; font-size:15pt; margin:16px 0 6px 0;">'
+            'Raw model output (unparseable)</h2>'
+            f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt;">The model did not return valid JSON. '
+            'Its full response is preserved verbatim below.</p>'
+            f'<pre style="white-space:pre-wrap; font-size:10pt; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' padding:10px; border:1px solid #D5E0D8;">{esc(raw_text)}</pre>'
+        )
+
+    if asx_url:
+        parts.append(
+            f'<p style="margin:16px 0 0 0; font-size:10pt;">Source announcement (ASX): '
+            f'<a href="{esc(asx_url)}">{esc(asx_url)}</a></p>'
+        )
+
+    return (
+        '<html><head><meta charset="utf-8">'
+        f'<title>{esc(title)}</title></head>'
+        '<body style="font-family:Arial, sans-serif; font-size:11pt; color:#111827;">'
+        + "".join(parts) +
+        "</body></html>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Remuneration output: verdict badge + five quick-take rows + short summary +
+# PDF-attached long-form analysis. Same table-based / inline-styles / 360px
+# card shape as the results card so it renders identically on a phone.
+# ---------------------------------------------------------------------------
+
+REMUNERATION_HEADER_LABEL = "Remuneration change"
+
+
+def _remuneration_verdict(analysis: dict) -> Tuple[str, str]:
+    """Return (verdict_label, colour) for the header pill.
+
+    "verdict" is the primary signal ("aligned"/"mixed"/"misaligned") and the
+    only field explicitly enumerated in the prompt schema. Score is a
+    secondary tell that lets the colour tighten when the model returns a 4
+    or 5 alongside "mixed", but a missing score never downgrades the colour.
+    """
+    verdict = str(analysis.get("verdict") or "").strip().lower()
+    if verdict in ("aligned", "well aligned", "strongly aligned"):
+        return "ALIGNED", COLOR_ALIGN_GOOD
+    if verdict in ("misaligned", "poorly aligned", "not aligned", "unaligned"):
+        return "MISALIGNED", COLOR_ALIGN_BAD
+    if verdict:
+        # "mixed", or any wording the model chose short of a clean thumbs
+        # up/down — surface it as MIXED so the reader knows to read.
+        return "MIXED", COLOR_ALIGN_MIXED
+    # Fall back on the numeric score when verdict was missing.
+    try:
+        score = int(str(analysis.get("alignment_score") or "").strip()[:1])
+    except (ValueError, TypeError):
+        return "REVIEW", COLOR_ALIGN_MIXED
+    if score >= 4:
+        return "ALIGNED", COLOR_ALIGN_GOOD
+    if score <= 2:
+        return "MISALIGNED", COLOR_ALIGN_BAD
+    return "MIXED", COLOR_ALIGN_MIXED
+
+
+def _remuneration_quick_take_row(analysis: dict, key: str) -> Dict[str, str]:
+    """Normalise one quick_take entry into {value, sub}.
+
+    Returns "not disclosed" (never n/a — n/a is a valid answer for a
+    dilution row when the plan is on-market or cash-settled, and using
+    the same token would blur the two).
+    """
+    qt = analysis.get("quick_take")
+    raw = qt.get(key) if isinstance(qt, dict) else None
+    value = sub = ""
+    if isinstance(raw, dict):
+        value = str(raw.get("value", "") or "").strip()
+        sub = str(raw.get("note", "") or "").strip()
+    elif raw not in (None, ""):
+        value = str(raw).strip()
+    if not value or value.lower() in _NA_TOKENS - {"n/a", "-", "--", "—"}:
+        value = "not disclosed"
+    return {"value": value, "sub": sub}
+
+
+def _remuneration_title(ticker: str, analysis: dict) -> str:
+    plan_name = str(analysis.get("plan_name") or "").strip()
+    if plan_name:
+        return f"{ticker} — {plan_name}"
+    return f"{ticker} — {REMUNERATION_HEADER_LABEL}"
+
+
+def _remuneration_context_line(analysis: dict) -> str:
+    plan_type = str(analysis.get("plan_type") or "").strip().replace("_", " ")
+    participants = str(analysis.get("participants") or "").strip()
+    if plan_type and participants:
+        return f"{plan_type.upper()} · {participants}"
+    return plan_type.upper() or participants or "Remuneration change"
+
+
+def build_remuneration_block(
+    ticker: str,
+    analysis: dict,
+    asx_url: str,
+    announced: str = "",
+) -> Dict[str, str]:
+    """Render the REMUNERATION digest block as {"text": ..., "html": ...}.
+
+    Same phone-first table shape as build_results_block. The long-form
+    analysis is not in the email — it goes to the attached PDF.
+    """
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or (
+        RESULTS_STATUS_FAILED if _is_llm_failure(analysis) else RESULTS_STATUS_OK
+    )
+    failed = status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR)
+    esc = htmlmod.escape
+
+    title = _remuneration_title(ticker, analysis)
+    context = _remuneration_context_line(analysis)
+    summary = str(analysis.get("summary") or "").strip() or "No summary returned."
+    verdict_label, verdict_colour = _remuneration_verdict(analysis)
+    rows = [(label, _remuneration_quick_take_row(analysis, key))
+            for key, label in REMUNERATION_QUICK_TAKE_ROWS]
+
+    # ---- plain text ----------------------------------------------------
+    text_lines: List[str] = []
+    if failed:
+        text_lines.append(f"{RESULTS_FAILURE_BADGE} — {title}")
+    else:
+        text_lines.append(title)
+    text_lines.append(f"{context}  [{verdict_label}]")
+    if announced:
+        text_lines.append(_announced_text_line(announced))
+    text_lines.append("")
+    for label, row in rows:
+        text_lines.append(f"  {label:<10} {row['value']}")
+        if row["sub"]:
+            text_lines.append(f"             ({row['sub']})")
+    text_lines.append("")
+    text_lines.append(summary)
+    text_lines.append("")
+    if asx_url:
+        text_lines.append(f"Source announcement (ASX): {asx_url}")
+    text_lines.append("")
+
+    # ---- html ----------------------------------------------------------
+    badge = RESULTS_FAILURE_BADGE if failed else "HIGH IMPACT"
+    badge_bg = COLOR_FAILURE if failed else COLOR_HIGH_IMPACT
+    badge_fg = "#FFFFFF" if failed else "#0B1220"
+
+    verdict_pill = (
+        f'<span style="display:inline-block; background:{verdict_colour}; color:#FFFFFF;'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px; margin-left:6px;">{esc(verdict_label)}</span>'
+    )
+
+    metric_rows_html = ""
+    for i, (label, row) in enumerate(rows):
+        bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else COLOR_RESULTS_CARD
+        sub_html = (
+            f'<div style="font-size:11px; color:{COLOR_RESULTS_MUTED}; margin-top:2px;">'
+            f'{esc(row["sub"])}</div>' if row["sub"] else ""
+        )
+        metric_rows_html += (
+            f'<tr>'
+            f'<td valign="top" style="background:{bg}; padding:11px 14px; font-size:13px;'
+            f' line-height:1.3; color:{COLOR_RESULTS_LABEL}; font-family:{EMAIL_FONT};'
+            f' white-space:nowrap; width:90px;">{esc(label)}</td>'
+            f'<td style="background:{bg}; padding:11px 14px; font-size:14px; line-height:1.35;'
+            f' color:{COLOR_RESULTS_VALUE}; font-weight:700; font-family:{EMAIL_FONT};">'
+            f'{esc(row["value"])}{sub_html}</td>'
+            f'</tr>'
+        )
+
+    def _link_row(label: str, href: str) -> str:
+        return (
+            f'<tr><td colspan="2" style="padding:0 14px 10px 14px; font-family:{EMAIL_FONT};">'
+            f'<a href="{esc(href)}" style="display:block; padding:11px 12px; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' border:1px solid #D5E0D8; border-radius:8px; color:{COLOR_RESULTS_HEADER};'
+            f' font-size:14px; font-weight:700; text-decoration:none;">{esc(label)} &rsaquo;</a>'
+            f'</td></tr>'
+        )
+
+    pdf_note_row = (
+        f'<tr><td colspan="2" style="padding:10px 14px; background:{COLOR_RESULTS_ROW_SHADE};'
+        f' color:{COLOR_RESULTS_MUTED}; font-family:{EMAIL_FONT};'
+        f' font-size:13px;">📎 Full remuneration analysis PDF attached to this email</td></tr>'
+    )
+    links_html = pdf_note_row
+    if asx_url:
+        links_html += _link_row("Source announcement (ASX)", asx_url)
+
+    html = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"'
+        f' style="border-collapse:collapse; margin:14px 0;"><tr><td align="center">'
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360"'
+        f' style="width:100%; max-width:360px; border-collapse:collapse;'
+        f' background:{COLOR_RESULTS_CARD}; border-radius:10px; overflow:hidden;">'
+        f'<tr><td colspan="2" style="background:{COLOR_RESULTS_HEADER}; padding:13px 14px;'
+        f' font-family:{EMAIL_FONT};">'
+        f'<span style="display:inline-block; background:{badge_bg}; color:{badge_fg};'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px;">{esc(badge)}</span>'
+        f'{verdict_pill}'
+        f'<div style="color:#FFFFFF; font-size:17px; font-weight:800; margin-top:7px;">{esc(title)}</div>'
+        f'<div style="color:{COLOR_RESULTS_HEADER_SUB}; font-size:12px; margin-top:3px;">{esc(context)}</div>'
+        f'{_announced_html_line(announced)}'
+        f'</td></tr>'
+        f'{metric_rows_html}'
+        f'<tr><td colspan="2" style="padding:13px 14px; font-family:{EMAIL_FONT}; font-size:15px;'
+        f' line-height:1.5; color:{COLOR_RESULTS_VALUE}; border-top:2px solid {COLOR_RESULTS_HEADER};">'
+        f'{esc(summary)}</td></tr>'
+        f'{links_html}'
+        f'</table></td></tr></table>'
+    )
+    return {"text": "\n".join(text_lines), "html": html}
+
+
+def build_remuneration_doc_html(
+    ticker: str,
+    analysis: dict,
+    asx_url: str = "",
+) -> str:
+    """Build the HTML the PDF is rendered from. Preserves the raw model text
+    verbatim on a parse failure, same rule as the results Doc."""
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or RESULTS_STATUS_OK
+    esc = htmlmod.escape
+    title = _remuneration_title(ticker, analysis)
+    context = _remuneration_context_line(analysis)
+    verdict_label, verdict_colour = _remuneration_verdict(analysis)
+
+    parts: List[str] = [
+        f'<h1 style="color:{COLOR_RESULTS_HEADER}; font-size:19pt; margin:0 0 2px 0;">{esc(title)}</h1>',
+        f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt; margin:0 0 14px 0;">'
+        f'{esc(context)} &nbsp;|&nbsp; Verdict: '
+        f'<span style="color:{verdict_colour}; font-weight:700;">{esc(verdict_label)}</span>'
+        f' &nbsp;|&nbsp; Generated by {esc(BOB_NAME)} {esc(VERSION_LABEL)} '
+        f'on {today_sgt_date().isoformat()} (SGT)</p>',
+    ]
+
+    if status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR):
+        parts.append(
+            f'<p style="background:#FEE2E2; border:1px solid {COLOR_FAILURE}; color:{COLOR_FAILURE};'
+            f' padding:10px 12px; font-weight:700;">{esc(RESULTS_FAILURE_BADGE)}: '
+            f'{esc(str(analysis.get("summary", "")))}</p>'
+        )
+
+    if isinstance(analysis.get("quick_take"), dict):
+        rows_html = ""
+        for i, (key, label) in enumerate(REMUNERATION_QUICK_TAKE_ROWS):
+            row = _remuneration_quick_take_row(analysis, key)
+            bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else "#FFFFFF"
+            sub = (f' <span style="color:{COLOR_RESULTS_MUTED}; font-size:9pt;">'
+                   f'({esc(row["sub"])})</span>') if row["sub"] else ""
+            rows_html += (
+                f'<tr>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">{esc(label)}</td>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">'
+                f'{esc(row["value"])}{sub}</td>'
+                f'</tr>'
+            )
+        parts.append(
+            '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;'
+            ' margin:10px 0 16px 0; font-size:11pt;">'
+            f'<tr>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Parameter</td>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Value</td>'
+            f'</tr>{rows_html}</table>'
+        )
+
+    summary = str(analysis.get("summary") or "").strip()
+    if summary:
+        parts.append(f'<h2 style="color:{COLOR_RESULTS_HEADER}; font-size:15pt; margin:16px 0 6px 0;">Summary</h2>')
+        parts.append(f'<p style="margin:8px 0; line-height:1.5;">{esc(summary)}</p>')
+
+    full_analysis = str(analysis.get("full_analysis") or "").strip()
+    if full_analysis:
+        parts.append(_markdown_to_html(full_analysis))
+
+    raw_text = str(analysis.get("_raw_text") or "").strip()
+    if raw_text:
+        parts.append(
+            f'<h2 style="color:{COLOR_FAILURE}; font-size:15pt; margin:16px 0 6px 0;">'
+            'Raw model output (unparseable)</h2>'
+            f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt;">The model did not return valid JSON. '
+            'Its full response is preserved verbatim below.</p>'
+            f'<pre style="white-space:pre-wrap; font-size:10pt; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' padding:10px; border:1px solid #D5E0D8;">{esc(raw_text)}</pre>'
+        )
+
+    if asx_url:
+        parts.append(
+            f'<p style="margin:16px 0 0 0; font-size:10pt;">Source announcement (ASX): '
+            f'<a href="{esc(asx_url)}">{esc(asx_url)}</a></p>'
+        )
+
+    return (
+        '<html><head><meta charset="utf-8">'
+        f'<title>{esc(title)}</title></head>'
+        '<body style="font-family:Arial, sans-serif; font-size:11pt; color:#111827;">'
+        + "".join(parts) +
+        "</body></html>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fundraising output (capital raise / debt raise): verdict pill + six
+# quick-take rows + <=5-sentence summary + PDF-attached long-form analysis.
+# Same table-based / inline-styles / 360px card as the results card so it
+# renders identically on a phone — replaces the old text-blob rendering.
+# ---------------------------------------------------------------------------
+
+FUNDRAISE_HEADER_LABEL = "Capital / Debt raise"
+
+_FUNDRAISE_KIND_LABELS = {
+    "debt": "Debt raise",
+    "equity": "Capital raise",
+    "hybrid": "Hybrid raise",
+}
+
+
+def _fundraise_verdict(analysis: dict) -> Tuple[str, str]:
+    """Return (verdict_label, colour) for the header pill — the 'is this a
+    rescue?' signal. opportunistic=green, neutral=blue, defensive=amber,
+    rescue=red. An unrecognised or missing verdict reads REVIEW (amber) so a
+    blank never looks like a clean bill of health."""
+    verdict = str(analysis.get("verdict") or "").strip().lower()
+    if verdict in ("opportunistic", "proactive", "strength"):
+        return "OPPORTUNISTIC", COLOR_ALIGN_GOOD
+    if verdict in ("neutral", "routine", "in line"):
+        return "NEUTRAL", COLOR_ALIGN_NEUTRAL
+    if verdict in ("defensive", "cautionary"):
+        return "DEFENSIVE", COLOR_ALIGN_MIXED
+    if verdict in ("rescue", "distressed", "emergency"):
+        return "RESCUE", COLOR_ALIGN_BAD
+    return "REVIEW", COLOR_ALIGN_MIXED
+
+
+def _fundraise_quick_take_row(analysis: dict, key: str) -> Dict[str, str]:
+    """Normalise one quick_take entry into {value, sub}. Undisclosed reads
+    'not disclosed' — never a guessed figure (the whole point of this card)."""
+    qt = analysis.get("quick_take")
+    raw = qt.get(key) if isinstance(qt, dict) else None
+    value = sub = ""
+    if isinstance(raw, dict):
+        value = str(raw.get("value", "") or "").strip()
+        sub = str(raw.get("note", "") or "").strip()
+    elif raw not in (None, ""):
+        value = str(raw).strip()
+    value = _apply_currency_prefix(value, analysis.get("currency", ""))
+    if not value or value.lower() in _NA_TOKENS - {"-", "--", "—"}:
+        value = "not disclosed"
+    return {"value": value, "sub": sub}
+
+
+def _fundraise_title(ticker: str, analysis: dict) -> str:
+    kind = str(analysis.get("kind") or "").strip().lower()
+    return f"{ticker} — {_FUNDRAISE_KIND_LABELS.get(kind, FUNDRAISE_HEADER_LABEL)}"
+
+
+def _fundraise_context_line(analysis: dict) -> str:
+    """e.g. 'Debt raise · reported in US$'."""
+    kind = str(analysis.get("kind") or "").strip().lower()
+    label = _FUNDRAISE_KIND_LABELS.get(kind, FUNDRAISE_HEADER_LABEL)
+    currency = str(analysis.get("currency") or "").strip().upper()
+    if not currency:
+        return label
+    return f"{label} · reported in {CURRENCY_PREFIXES.get(currency, currency)}"
+
+
+# ---------------------------------------------------------------------------
+# Trading update card — a short quick-take table + <=5-sentence summary, same
+# phone-first shape as the fundraise card. The forensic detail lives in the
+# attached PDF, not the email. Replaces the old free-text what_they_said/...
+# schema that rendered as a wall of prose (see CLAUDE.md).
+# ---------------------------------------------------------------------------
+
+TRADING_UPDATE_HEADER_LABEL = "Trading update"
+
+
+def _trading_update_verdict(analysis: dict) -> Tuple[str, str]:
+    """Read the header pill off quick_take.guidance_call — free text from the
+    model, matched loosely since it is not a locked enum. An unrecognised or
+    missing call reads REVIEW (amber), never a silent clean bill of health."""
+    qt = analysis.get("quick_take")
+    raw = qt.get("guidance_call") if isinstance(qt, dict) else None
+    value = str(raw.get("value") if isinstance(raw, dict) else raw or "").strip().lower()
+    if "upgrade" in value or "beat" in value:
+        return "UPGRADE", COLOR_ALIGN_GOOD
+    if "downgrade" in value or "miss" in value or "warning" in value:
+        return "DOWNGRADE", COLOR_ALIGN_BAD
+    if "withdrawn" in value:
+        return "WITHDRAWN", COLOR_ALIGN_BAD
+    if "in-line" in value or "in line" in value:
+        return "IN LINE", COLOR_ALIGN_NEUTRAL
+    return "REVIEW", COLOR_ALIGN_MIXED
+
+
+def _trading_update_quick_take_row(analysis: dict, key: str) -> Dict[str, str]:
+    """Normalise one quick_take entry into {value, sub}. Undisclosed reads
+    'not disclosed' — never a guessed figure."""
+    qt = analysis.get("quick_take")
+    raw = qt.get(key) if isinstance(qt, dict) else None
+    value = sub = ""
+    if isinstance(raw, dict):
+        value = str(raw.get("value", "") or "").strip()
+        sub = str(raw.get("note", "") or "").strip()
+    elif raw not in (None, ""):
+        value = str(raw).strip()
+    value = _apply_currency_prefix(value, analysis.get("currency", ""))
+    if not value or value.lower() in _NA_TOKENS - {"-", "--", "—"}:
+        value = "not disclosed"
+    return {"value": value, "sub": sub}
+
+
+def _trading_update_title(ticker: str, analysis: dict) -> str:
+    return f"{ticker} — {TRADING_UPDATE_HEADER_LABEL}"
+
+
+def _trading_update_context_line(analysis: dict) -> str:
+    currency = str(analysis.get("currency") or "").strip().upper()
+    if not currency:
+        return TRADING_UPDATE_HEADER_LABEL
+    return f"{TRADING_UPDATE_HEADER_LABEL}, reported in {CURRENCY_PREFIXES.get(currency, currency)}"
+
+
+def build_trading_update_block(ticker: str, analysis: dict, asx_url: str, announced: str = "") -> Dict[str, str]:
+    """Render the TRADING_UPDATE digest block as {"text": ..., "html": ...}.
+
+    Same table-only, inline-styles card as build_fundraise_block. The old
+    build_high_impact_block wall-of-text path is gone for this type — the
+    long-form analysis lives in the attached PDF.
+    """
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or (
+        RESULTS_STATUS_FAILED if _is_llm_failure(analysis) else RESULTS_STATUS_OK
+    )
+    failed = status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR)
+    esc = htmlmod.escape
+
+    title = _trading_update_title(ticker, analysis)
+    context = _trading_update_context_line(analysis)
+    summary = str(analysis.get("summary") or "").strip() or "No summary returned."
+    verdict_label, verdict_colour = _trading_update_verdict(analysis)
+    rows = [(label, _trading_update_quick_take_row(analysis, key))
+            for key, label in TRADING_UPDATE_QUICK_TAKE_ROWS]
+
+    # ---- plain text ----------------------------------------------------
+    text_lines: List[str] = []
+    if failed:
+        text_lines.append(f"{RESULTS_FAILURE_BADGE} — {title}")
+    else:
+        text_lines.append(title)
+    text_lines.append(f"{context}  [{verdict_label}]")
+    if announced:
+        text_lines.append(_announced_text_line(announced))
+    text_lines.append("")
+    for label, row in rows:
+        text_lines.append(f"  {label:<16} {row['value']}")
+        if row["sub"]:
+            text_lines.append(f"                   ({row['sub']})")
+    text_lines.append("")
+    text_lines.append(summary)
+    text_lines.append("")
+    if asx_url:
+        text_lines.append(f"Source announcement (ASX): {asx_url}")
+    text_lines.append("")
+
+    # ---- html ----------------------------------------------------------
+    badge = RESULTS_FAILURE_BADGE if failed else "HIGH IMPACT"
+    badge_bg = COLOR_FAILURE if failed else COLOR_HIGH_IMPACT
+    badge_fg = "#FFFFFF" if failed else "#0B1220"
+
+    verdict_pill = (
+        f'<span style="display:inline-block; background:{verdict_colour}; color:#FFFFFF;'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px; margin-left:6px;">{esc(verdict_label)}</span>'
+    )
+
+    metric_rows_html = ""
+    for i, (label, row) in enumerate(rows):
+        bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else COLOR_RESULTS_CARD
+        sub_html = (
+            f'<div style="font-size:11px; color:{COLOR_RESULTS_MUTED}; margin-top:2px;">'
+            f'{esc(row["sub"])}</div>' if row["sub"] else ""
+        )
+        metric_rows_html += (
+            f'<tr>'
+            f'<td valign="top" style="background:{bg}; padding:11px 14px; font-size:13px;'
+            f' line-height:1.3; color:{COLOR_RESULTS_LABEL}; font-family:{EMAIL_FONT};'
+            f' white-space:nowrap; width:96px;">{esc(label)}</td>'
+            f'<td style="background:{bg}; padding:11px 14px; font-size:14px; line-height:1.35;'
+            f' color:{COLOR_RESULTS_VALUE}; font-weight:700; font-family:{EMAIL_FONT};">'
+            f'{esc(row["value"])}{sub_html}</td>'
+            f'</tr>'
+        )
+
+    def _link_row(label: str, href: str) -> str:
+        return (
+            f'<tr><td colspan="2" style="padding:0 14px 10px 14px; font-family:{EMAIL_FONT};">'
+            f'<a href="{esc(href)}" style="display:block; padding:11px 12px; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' border:1px solid #D5E0D8; border-radius:8px; color:{COLOR_RESULTS_HEADER};'
+            f' font-size:14px; font-weight:700; text-decoration:none;">{esc(label)} &rsaquo;</a>'
+            f'</td></tr>'
+        )
+
+    pdf_note_row = (
+        f'<tr><td colspan="2" style="padding:10px 14px; background:{COLOR_RESULTS_ROW_SHADE};'
+        f' color:{COLOR_RESULTS_MUTED}; font-family:{EMAIL_FONT};'
+        f' font-size:13px;">📎 Full trading update analysis PDF attached to this email</td></tr>'
+    )
+    links_html = pdf_note_row
+    if asx_url:
+        links_html += _link_row("Source announcement (ASX)", asx_url)
+
+    html = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"'
+        f' style="border-collapse:collapse; margin:14px 0;"><tr><td align="center">'
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360"'
+        f' style="width:100%; max-width:360px; border-collapse:collapse;'
+        f' background:{COLOR_RESULTS_CARD}; border-radius:10px; overflow:hidden;">'
+        f'<tr><td colspan="2" style="background:{COLOR_RESULTS_HEADER}; padding:13px 14px;'
+        f' font-family:{EMAIL_FONT};">'
+        f'<span style="display:inline-block; background:{badge_bg}; color:{badge_fg};'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px;">{esc(badge)}</span>'
+        f'{verdict_pill}'
+        f'<div style="color:#FFFFFF; font-size:17px; font-weight:800; margin-top:7px;">{esc(title)}</div>'
+        f'<div style="color:{COLOR_RESULTS_HEADER_SUB}; font-size:12px; margin-top:3px;">{esc(context)}</div>'
+        f'{_announced_html_line(announced)}'
+        f'</td></tr>'
+        f'{metric_rows_html}'
+        f'<tr><td colspan="2" style="padding:13px 14px; font-family:{EMAIL_FONT}; font-size:15px;'
+        f' line-height:1.5; color:{COLOR_RESULTS_VALUE}; border-top:2px solid {COLOR_RESULTS_HEADER};">'
+        f'{esc(summary)}</td></tr>'
+        f'{links_html}'
+        f'</table></td></tr></table>'
+    )
+    return {"text": "\n".join(text_lines), "html": html}
+
+
+def build_trading_update_doc_html(ticker: str, analysis: dict, asx_url: str = "") -> str:
+    """Build the HTML the attached PDF is rendered from. Preserves the raw
+    model text verbatim on a parse failure, same rule as every other PDF."""
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or RESULTS_STATUS_OK
+    esc = htmlmod.escape
+    title = _trading_update_title(ticker, analysis)
+    context = _trading_update_context_line(analysis)
+    verdict_label, verdict_colour = _trading_update_verdict(analysis)
+
+    parts: List[str] = [
+        f'<h1 style="color:{COLOR_RESULTS_HEADER}; font-size:19pt; margin:0 0 2px 0;">{esc(title)}</h1>',
+        f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt; margin:0 0 14px 0;">'
+        f'{esc(context)} &nbsp;|&nbsp; vs guidance: '
+        f'<span style="color:{verdict_colour}; font-weight:700;">{esc(verdict_label)}</span>'
+        f' &nbsp;|&nbsp; Generated by {esc(BOB_NAME)} {esc(VERSION_LABEL)} '
+        f'on {today_sgt_date().isoformat()} (SGT)</p>',
+    ]
+
+    if status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR):
+        parts.append(
+            f'<p style="background:#FEE2E2; border:1px solid {COLOR_FAILURE}; color:{COLOR_FAILURE};'
+            f' padding:10px 12px; font-weight:700;">{esc(RESULTS_FAILURE_BADGE)}: '
+            f'{esc(str(analysis.get("summary", "")))}</p>'
+        )
+
+    if isinstance(analysis.get("quick_take"), dict):
+        rows_html = ""
+        for i, (key, label) in enumerate(TRADING_UPDATE_QUICK_TAKE_ROWS):
+            row = _trading_update_quick_take_row(analysis, key)
+            bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else "#FFFFFF"
+            sub = (f' <span style="color:{COLOR_RESULTS_MUTED}; font-size:9pt;">'
+                   f'({esc(row["sub"])})</span>') if row["sub"] else ""
+            rows_html += (
+                f'<tr>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">{esc(label)}</td>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">'
+                f'{esc(row["value"])}{sub}</td>'
+                f'</tr>'
+            )
+        parts.append(
+            '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;'
+            ' margin:10px 0 16px 0; font-size:11pt;">'
+            f'<tr>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Term</td>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Detail</td>'
+            f'</tr>{rows_html}</table>'
+        )
+
+    summary = str(analysis.get("summary") or "").strip()
+    if summary:
+        parts.append(f'<h2 style="color:{COLOR_RESULTS_HEADER}; font-size:15pt; margin:16px 0 6px 0;">Summary</h2>')
+        parts.append(f'<p style="margin:8px 0; line-height:1.5;">{esc(summary)}</p>')
+
+    full_analysis = str(analysis.get("full_analysis") or "").strip()
+    if full_analysis:
+        parts.append(_markdown_to_html(full_analysis))
+
+    raw_text = str(analysis.get("_raw_text") or "").strip()
+    if raw_text:
+        parts.append(
+            f'<h2 style="color:{COLOR_FAILURE}; font-size:15pt; margin:16px 0 6px 0;">'
+            'Raw model output (unparseable)</h2>'
+            f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt;">The model did not return valid JSON. '
+            'Its full response is preserved verbatim below.</p>'
+            f'<pre style="white-space:pre-wrap; font-size:10pt; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' padding:10px; border:1px solid #D5E0D8;">{esc(raw_text)}</pre>'
+        )
+
+    if asx_url:
+        parts.append(
+            f'<p style="margin:16px 0 0 0; font-size:10pt;">Source announcement (ASX): '
+            f'<a href="{esc(asx_url)}">{esc(asx_url)}</a></p>'
+        )
+
+    return (
+        '<html><head><meta charset="utf-8">'
+        f'<title>{esc(title)}</title></head>'
+        '<body style="font-family:Arial, sans-serif; font-size:11pt; color:#111827;">'
+        + "".join(parts) +
+        "</body></html>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Appendix 4C / 5B quarterly cash flow card. Same phone-first shape again:
+# operating/investing/financing cash flow this quarter, the cash position,
+# and the Question 8 runway figure — the single most useful number in a
+# small-cap 4C — as the header verdict pill. Forensic cash-flow-walk detail
+# goes to the attached PDF.
+# ---------------------------------------------------------------------------
+
+QUARTERLY_4C_HEADER_LABEL = "Quarterly cash flow (4C)"
+
+
+def _4c_title(ticker: str, analysis: dict) -> str:
+    period = str(analysis.get("period") or "").strip()
+    return f"{ticker} — {period} cash flow (4C)" if period else f"{ticker} — {QUARTERLY_4C_HEADER_LABEL}"
+
+
+def _4c_context_line(analysis: dict) -> str:
+    currency = str(analysis.get("currency") or "").strip().upper()
+    if not currency:
+        return QUARTERLY_4C_HEADER_LABEL
+    return f"{QUARTERLY_4C_HEADER_LABEL}, reported in {CURRENCY_PREFIXES.get(currency, currency)}"
+
+
+def _4c_cashflow_row(analysis: dict, key: str) -> Dict[str, str]:
+    """Normalise one cash_flow entry into {value, sub}, where sub carries the
+    YTD figure (when it differs from this quarter's) and the item note."""
+    cf = analysis.get("cash_flow")
+    raw = cf.get(key) if isinstance(cf, dict) else None
+    value = ytd = note = ""
+    if isinstance(raw, dict):
+        value = str(raw.get("value", "") or "").strip()
+        ytd = str(raw.get("ytd", "") or "").strip()
+        note = str(raw.get("note", "") or "").strip()
+    elif raw not in (None, ""):
+        value = str(raw).strip()
+    value = _apply_currency_prefix(value, analysis.get("currency", ""))
+    ytd = _apply_currency_prefix(ytd, analysis.get("currency", ""))
+    if _is_na(value):
+        value = "n/a"
+    sub_parts = []
+    if ytd and not _is_na(ytd) and ytd != value:
+        sub_parts.append(f"YTD {ytd}")
+    if note:
+        sub_parts.append(note)
+    return {"value": value, "sub": " · ".join(sub_parts)}
+
+
+def _4c_runway_line(analysis: dict) -> Dict[str, str]:
+    runway = analysis.get("runway") if isinstance(analysis.get("runway"), dict) else {}
+    quarters = str(runway.get("quarters") or "").strip()
+    basis = str(runway.get("basis") or "").strip()
+    value = "n/a" if (not quarters or _is_na(quarters)) else f"{quarters} quarters"
+    return {"value": value, "sub": basis}
+
+
+def _4c_runway_verdict(analysis: dict) -> Tuple[str, str]:
+    """The header pill: how urgent is the runway. A missing/unparseable
+    figure reads REVIEW (amber) — never a silent clean bill of health. An
+    explicit 'n/a' (operating cash flow positive — see QUARTERLY_4C_PROMPT)
+    reads SELF-FUNDED (green)."""
+    runway = analysis.get("runway") if isinstance(analysis.get("runway"), dict) else {}
+    quarters_raw = str(runway.get("quarters") or "").strip()
+    if not quarters_raw:
+        # Missing entirely (no "runway" object, or an empty quarters field) is
+        # not the same as the model explicitly saying "n/a" — don't let a
+        # blank read as a clean bill of health.
+        return "REVIEW", COLOR_ALIGN_MIXED
+    try:
+        quarters = float(quarters_raw)
+    except (TypeError, ValueError):
+        if _is_na(quarters_raw):
+            return "SELF-FUNDED", COLOR_ALIGN_GOOD
+        return "REVIEW", COLOR_ALIGN_MIXED
+    if quarters < 2:
+        return "URGENT", COLOR_ALIGN_BAD
+    if quarters < 4:
+        return "WATCH", COLOR_ALIGN_MIXED
+    if quarters < 8:
+        return "ADEQUATE", COLOR_ALIGN_NEUTRAL
+    return "LONG RUNWAY", COLOR_ALIGN_GOOD
+
+
+def _4c_card_rows(analysis: dict) -> List[Tuple[str, Dict[str, str]]]:
+    rows = [(label, _4c_cashflow_row(analysis, key)) for key, label in QUARTERLY_4C_CASHFLOW_ROWS]
+    cash_position = analysis.get("cash_position") if isinstance(analysis.get("cash_position"), dict) else {}
+    rows.append(("Cash at quarter end", {
+        "value": _apply_currency_prefix(str(cash_position.get("value") or "n/a"), analysis.get("currency", "")),
+        "sub": str(cash_position.get("note") or ""),
+    }))
+    rows.append(("Runway", _4c_runway_line(analysis)))
+    return rows
+
+
+def build_4c_block(ticker: str, analysis: dict, asx_url: str, announced: str = "") -> Dict[str, str]:
+    """Render the QUARTERLY_4C digest block as {"text": ..., "html": ...}.
+
+    Same table-only, inline-styles card as the other structured types. The
+    runway figure (Question 8) is the header verdict pill, not buried in the
+    PDF, because it is the question a holder actually wants answered.
+    """
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or (
+        RESULTS_STATUS_FAILED if _is_llm_failure(analysis) else RESULTS_STATUS_OK
+    )
+    failed = status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR)
+    esc = htmlmod.escape
+
+    title = _4c_title(ticker, analysis)
+    context = _4c_context_line(analysis)
+    summary = str(analysis.get("summary") or "").strip() or "No summary returned."
+    verdict_label, verdict_colour = _4c_runway_verdict(analysis)
+    rows = _4c_card_rows(analysis)
+
+    # ---- plain text ----------------------------------------------------
+    text_lines: List[str] = []
+    if failed:
+        text_lines.append(f"{RESULTS_FAILURE_BADGE} — {title}")
+    else:
+        text_lines.append(title)
+    text_lines.append(f"{context}  [{verdict_label}]")
+    if announced:
+        text_lines.append(_announced_text_line(announced))
+    text_lines.append("")
+    for label, row in rows:
+        text_lines.append(f"  {label:<22} {row['value']}")
+        if row["sub"]:
+            text_lines.append(f"      ({row['sub']})")
+    text_lines.append("")
+    text_lines.append(summary)
+    text_lines.append("")
+    if asx_url:
+        text_lines.append(f"Source announcement (ASX): {asx_url}")
+    text_lines.append("")
+
+    # ---- html ----------------------------------------------------------
+    badge = RESULTS_FAILURE_BADGE if failed else "HIGH IMPACT"
+    badge_bg = COLOR_FAILURE if failed else COLOR_HIGH_IMPACT
+    badge_fg = "#FFFFFF" if failed else "#0B1220"
+
+    verdict_pill = (
+        f'<span style="display:inline-block; background:{verdict_colour}; color:#FFFFFF;'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px; margin-left:6px;">{esc(verdict_label)}</span>'
+    )
+
+    metric_rows_html = ""
+    for i, (label, row) in enumerate(rows):
+        bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else COLOR_RESULTS_CARD
+        sub_html = (
+            f'<div style="font-size:11px; color:{COLOR_RESULTS_MUTED}; margin-top:2px;">'
+            f'{esc(row["sub"])}</div>' if row["sub"] else ""
+        )
+        metric_rows_html += (
+            f'<tr>'
+            f'<td style="background:{bg}; padding:11px 14px; font-size:14px; line-height:1.3;'
+            f' color:{COLOR_RESULTS_LABEL}; font-family:{EMAIL_FONT};">{esc(label)}{sub_html}</td>'
+            f'<td align="right" style="background:{bg}; padding:11px 14px; font-size:15px;'
+            f' line-height:1.3; color:{COLOR_RESULTS_VALUE}; font-weight:700; white-space:nowrap;'
+            f' font-family:{EMAIL_FONT};">{esc(row["value"])}</td>'
+            f'</tr>'
+        )
+
+    def _link_row(label: str, href: str) -> str:
+        return (
+            f'<tr><td colspan="2" style="padding:0 14px 10px 14px; font-family:{EMAIL_FONT};">'
+            f'<a href="{esc(href)}" style="display:block; padding:11px 12px; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' border:1px solid #D5E0D8; border-radius:8px; color:{COLOR_RESULTS_HEADER};'
+            f' font-size:14px; font-weight:700; text-decoration:none;">{esc(label)} &rsaquo;</a>'
+            f'</td></tr>'
+        )
+
+    pdf_note_row = (
+        f'<tr><td colspan="2" style="padding:10px 14px; background:{COLOR_RESULTS_ROW_SHADE};'
+        f' color:{COLOR_RESULTS_MUTED}; font-family:{EMAIL_FONT};'
+        f' font-size:13px;">📎 Full cash flow analysis PDF attached to this email</td></tr>'
+    )
+    links_html = pdf_note_row
+    if asx_url:
+        links_html += _link_row("Source announcement (ASX)", asx_url)
+
+    html = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"'
+        f' style="border-collapse:collapse; margin:14px 0;"><tr><td align="center">'
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360"'
+        f' style="width:100%; max-width:360px; border-collapse:collapse;'
+        f' background:{COLOR_RESULTS_CARD}; border-radius:10px; overflow:hidden;">'
+        f'<tr><td colspan="2" style="background:{COLOR_RESULTS_HEADER}; padding:13px 14px;'
+        f' font-family:{EMAIL_FONT};">'
+        f'<span style="display:inline-block; background:{badge_bg}; color:{badge_fg};'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px;">{esc(badge)}</span>'
+        f'{verdict_pill}'
+        f'<div style="color:#FFFFFF; font-size:17px; font-weight:800; margin-top:7px;">{esc(title)}</div>'
+        f'<div style="color:{COLOR_RESULTS_HEADER_SUB}; font-size:12px; margin-top:3px;">{esc(context)}</div>'
+        f'{_announced_html_line(announced)}'
+        f'</td></tr>'
+        f'{metric_rows_html}'
+        f'<tr><td colspan="2" style="padding:13px 14px; font-family:{EMAIL_FONT}; font-size:15px;'
+        f' line-height:1.5; color:{COLOR_RESULTS_VALUE}; border-top:2px solid {COLOR_RESULTS_HEADER};">'
+        f'{esc(summary)}</td></tr>'
+        f'{links_html}'
+        f'</table></td></tr></table>'
+    )
+    return {"text": "\n".join(text_lines), "html": html}
+
+
+def build_4c_doc_html(ticker: str, analysis: dict, asx_url: str = "") -> str:
+    """Build the HTML the attached PDF is rendered from. Preserves the raw
+    model text verbatim on a parse failure, same rule as every other PDF."""
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or RESULTS_STATUS_OK
+    esc = htmlmod.escape
+    title = _4c_title(ticker, analysis)
+    context = _4c_context_line(analysis)
+    verdict_label, verdict_colour = _4c_runway_verdict(analysis)
+
+    parts: List[str] = [
+        f'<h1 style="color:{COLOR_RESULTS_HEADER}; font-size:19pt; margin:0 0 2px 0;">{esc(title)}</h1>',
+        f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt; margin:0 0 14px 0;">'
+        f'{esc(context)} &nbsp;|&nbsp; Runway: '
+        f'<span style="color:{verdict_colour}; font-weight:700;">{esc(verdict_label)}</span>'
+        f' &nbsp;|&nbsp; Generated by {esc(BOB_NAME)} {esc(VERSION_LABEL)} '
+        f'on {today_sgt_date().isoformat()} (SGT)</p>',
+    ]
+
+    if status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR):
+        parts.append(
+            f'<p style="background:#FEE2E2; border:1px solid {COLOR_FAILURE}; color:{COLOR_FAILURE};'
+            f' padding:10px 12px; font-weight:700;">{esc(RESULTS_FAILURE_BADGE)}: '
+            f'{esc(str(analysis.get("summary", "")))}</p>'
+        )
+
+    rows = _4c_card_rows(analysis)
+    rows_html = ""
+    for i, (label, row) in enumerate(rows):
+        bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else "#FFFFFF"
+        sub = (f' <span style="color:{COLOR_RESULTS_MUTED}; font-size:9pt;">'
+               f'({esc(row["sub"])})</span>') if row["sub"] else ""
+        rows_html += (
+            f'<tr>'
+            f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">{esc(label)}</td>'
+            f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">'
+            f'{esc(row["value"])}{sub}</td>'
+            f'</tr>'
+        )
+    parts.append(
+        '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;'
+        ' margin:10px 0 16px 0; font-size:11pt;">'
+        f'<tr>'
+        f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Line</td>'
+        f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">This quarter</td>'
+        f'</tr>{rows_html}</table>'
+    )
+
+    summary = str(analysis.get("summary") or "").strip()
+    if summary:
+        parts.append(f'<h2 style="color:{COLOR_RESULTS_HEADER}; font-size:15pt; margin:16px 0 6px 0;">Summary</h2>')
+        parts.append(f'<p style="margin:8px 0; line-height:1.5;">{esc(summary)}</p>')
+
+    full_analysis = str(analysis.get("full_analysis") or "").strip()
+    if full_analysis:
+        parts.append(_markdown_to_html(full_analysis))
+
+    raw_text = str(analysis.get("_raw_text") or "").strip()
+    if raw_text:
+        parts.append(
+            f'<h2 style="color:{COLOR_FAILURE}; font-size:15pt; margin:16px 0 6px 0;">'
+            'Raw model output (unparseable)</h2>'
+            f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt;">The model did not return valid JSON. '
+            'Its full response is preserved verbatim below.</p>'
+            f'<pre style="white-space:pre-wrap; font-size:10pt; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' padding:10px; border:1px solid #D5E0D8;">{esc(raw_text)}</pre>'
+        )
+
+    if asx_url:
+        parts.append(
+            f'<p style="margin:16px 0 0 0; font-size:10pt;">Source announcement (ASX): '
+            f'<a href="{esc(asx_url)}">{esc(asx_url)}</a></p>'
+        )
+
+    return (
+        '<html><head><meta charset="utf-8">'
+        f'<title>{esc(title)}</title></head>'
+        '<body style="font-family:Arial, sans-serif; font-size:11pt; color:#111827;">'
+        + "".join(parts) +
+        "</body></html>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Acquisition card — a locked quick-take table + <=5-sentence summary, same
+# phone-first shape as the fundraise and trading-update cards. No verdict
+# pill: unlike a raise (opportunistic/rescue) or a trading update (beat/miss)
+# there is no single good/bad axis for an acquisition — the quick-take rows
+# plus the full_analysis forensic detail carry the judgement instead, same
+# as the results card. Replaces the old free-text deal_summary/... schema
+# that rendered as a wall of prose (AHC's CareTech + RTM deals, 2026-10-16).
+# ---------------------------------------------------------------------------
+
+ACQUISITION_HEADER_LABEL = "Acquisition"
+
+
+def _acquisition_title(ticker: str, analysis: dict) -> str:
+    target = str(analysis.get("target_name") or "").strip()
+    return f"{ticker} — Acquisition: {target}" if target else f"{ticker} — {ACQUISITION_HEADER_LABEL}"
+
+
+def _acquisition_context_line(analysis: dict) -> str:
+    currency = str(analysis.get("currency") or "").strip().upper()
+    if not currency:
+        return ACQUISITION_HEADER_LABEL
+    return f"{ACQUISITION_HEADER_LABEL}, reported in {CURRENCY_PREFIXES.get(currency, currency)}"
+
+
+def _acquisition_quick_take_row(analysis: dict, key: str) -> Dict[str, str]:
+    """Normalise one quick_take entry into {value, sub}. Undisclosed reads
+    'not disclosed' — never a guessed figure."""
+    qt = analysis.get("quick_take")
+    raw = qt.get(key) if isinstance(qt, dict) else None
+    value = sub = ""
+    if isinstance(raw, dict):
+        value = str(raw.get("value", "") or "").strip()
+        sub = str(raw.get("note", "") or "").strip()
+    elif raw not in (None, ""):
+        value = str(raw).strip()
+    value = _apply_currency_prefix(value, analysis.get("currency", ""))
+    if not value or value.lower() in _NA_TOKENS - {"-", "--", "—"}:
+        value = "not disclosed"
+    return {"value": value, "sub": sub}
+
+
+def build_acquisition_block(ticker: str, analysis: dict, asx_url: str, announced: str = "") -> Dict[str, str]:
+    """Render the ACQUISITION digest block as {"text": ..., "html": ...}.
+
+    Same table-only, inline-styles card as build_fundraise_block. The old
+    build_high_impact_block wall-of-text path is gone for this type — the
+    long-form analysis lives in the attached PDF.
+    """
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or (
+        RESULTS_STATUS_FAILED if _is_llm_failure(analysis) else RESULTS_STATUS_OK
+    )
+    failed = status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR)
+    esc = htmlmod.escape
+
+    title = _acquisition_title(ticker, analysis)
+    context = _acquisition_context_line(analysis)
+    summary = str(analysis.get("summary") or "").strip() or "No summary returned."
+    rows = [(label, _acquisition_quick_take_row(analysis, key))
+            for key, label in ACQUISITION_QUICK_TAKE_ROWS]
+
+    # ---- plain text ----------------------------------------------------
+    text_lines: List[str] = []
+    if failed:
+        text_lines.append(f"{RESULTS_FAILURE_BADGE} — {title}")
+    else:
+        text_lines.append(title)
+    text_lines.append(context)
+    if announced:
+        text_lines.append(_announced_text_line(announced))
+    text_lines.append("")
+    for label, row in rows:
+        text_lines.append(f"  {label:<16} {row['value']}")
+        if row["sub"]:
+            text_lines.append(f"                   ({row['sub']})")
+    text_lines.append("")
+    text_lines.append(summary)
+    text_lines.append("")
+    if asx_url:
+        text_lines.append(f"Source announcement (ASX): {asx_url}")
+    text_lines.append("")
+
+    # ---- html ----------------------------------------------------------
+    badge = RESULTS_FAILURE_BADGE if failed else "HIGH IMPACT"
+    badge_bg = COLOR_FAILURE if failed else COLOR_HIGH_IMPACT
+    badge_fg = "#FFFFFF" if failed else "#0B1220"
+
+    metric_rows_html = ""
+    for i, (label, row) in enumerate(rows):
+        bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else COLOR_RESULTS_CARD
+        sub_html = (
+            f'<div style="font-size:11px; color:{COLOR_RESULTS_MUTED}; margin-top:2px;">'
+            f'{esc(row["sub"])}</div>' if row["sub"] else ""
+        )
+        metric_rows_html += (
+            f'<tr>'
+            f'<td valign="top" style="background:{bg}; padding:11px 14px; font-size:13px;'
+            f' line-height:1.3; color:{COLOR_RESULTS_LABEL}; font-family:{EMAIL_FONT};'
+            f' white-space:nowrap; width:96px;">{esc(label)}</td>'
+            f'<td style="background:{bg}; padding:11px 14px; font-size:14px; line-height:1.35;'
+            f' color:{COLOR_RESULTS_VALUE}; font-weight:700; font-family:{EMAIL_FONT};">'
+            f'{esc(row["value"])}{sub_html}</td>'
+            f'</tr>'
+        )
+
+    def _link_row(label: str, href: str) -> str:
+        return (
+            f'<tr><td colspan="2" style="padding:0 14px 10px 14px; font-family:{EMAIL_FONT};">'
+            f'<a href="{esc(href)}" style="display:block; padding:11px 12px; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' border:1px solid #D5E0D8; border-radius:8px; color:{COLOR_RESULTS_HEADER};'
+            f' font-size:14px; font-weight:700; text-decoration:none;">{esc(label)} &rsaquo;</a>'
+            f'</td></tr>'
+        )
+
+    pdf_note_row = (
+        f'<tr><td colspan="2" style="padding:10px 14px; background:{COLOR_RESULTS_ROW_SHADE};'
+        f' color:{COLOR_RESULTS_MUTED}; font-family:{EMAIL_FONT};'
+        f' font-size:13px;">📎 Full acquisition analysis PDF attached to this email</td></tr>'
+    )
+    links_html = pdf_note_row
+    if asx_url:
+        links_html += _link_row("Source announcement (ASX)", asx_url)
+
+    html = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"'
+        f' style="border-collapse:collapse; margin:14px 0;"><tr><td align="center">'
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360"'
+        f' style="width:100%; max-width:360px; border-collapse:collapse;'
+        f' background:{COLOR_RESULTS_CARD}; border-radius:10px; overflow:hidden;">'
+        f'<tr><td colspan="2" style="background:{COLOR_RESULTS_HEADER}; padding:13px 14px;'
+        f' font-family:{EMAIL_FONT};">'
+        f'<span style="display:inline-block; background:{badge_bg}; color:{badge_fg};'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px;">{esc(badge)}</span>'
+        f'<div style="color:#FFFFFF; font-size:17px; font-weight:800; margin-top:7px;">{esc(title)}</div>'
+        f'<div style="color:{COLOR_RESULTS_HEADER_SUB}; font-size:12px; margin-top:3px;">{esc(context)}</div>'
+        f'{_announced_html_line(announced)}'
+        f'</td></tr>'
+        f'{metric_rows_html}'
+        f'<tr><td colspan="2" style="padding:13px 14px; font-family:{EMAIL_FONT}; font-size:15px;'
+        f' line-height:1.5; color:{COLOR_RESULTS_VALUE}; border-top:2px solid {COLOR_RESULTS_HEADER};">'
+        f'{esc(summary)}</td></tr>'
+        f'{links_html}'
+        f'</table></td></tr></table>'
+    )
+    return {"text": "\n".join(text_lines), "html": html}
+
+
+def build_acquisition_doc_html(ticker: str, analysis: dict, asx_url: str = "") -> str:
+    """Build the HTML the attached PDF is rendered from. Preserves the raw
+    model text verbatim on a parse failure, same rule as every other PDF."""
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or RESULTS_STATUS_OK
+    esc = htmlmod.escape
+    title = _acquisition_title(ticker, analysis)
+    context = _acquisition_context_line(analysis)
+
+    parts: List[str] = [
+        f'<h1 style="color:{COLOR_RESULTS_HEADER}; font-size:19pt; margin:0 0 2px 0;">{esc(title)}</h1>',
+        f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt; margin:0 0 14px 0;">'
+        f'{esc(context)} &nbsp;|&nbsp; Generated by {esc(BOB_NAME)} {esc(VERSION_LABEL)} '
+        f'on {today_sgt_date().isoformat()} (SGT)</p>',
+    ]
+
+    if status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR):
+        parts.append(
+            f'<p style="background:#FEE2E2; border:1px solid {COLOR_FAILURE}; color:{COLOR_FAILURE};'
+            f' padding:10px 12px; font-weight:700;">{esc(RESULTS_FAILURE_BADGE)}: '
+            f'{esc(str(analysis.get("summary", "")))}</p>'
+        )
+
+    if isinstance(analysis.get("quick_take"), dict):
+        rows_html = ""
+        for i, (key, label) in enumerate(ACQUISITION_QUICK_TAKE_ROWS):
+            row = _acquisition_quick_take_row(analysis, key)
+            bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else "#FFFFFF"
+            sub = (f' <span style="color:{COLOR_RESULTS_MUTED}; font-size:9pt;">'
+                   f'({esc(row["sub"])})</span>') if row["sub"] else ""
+            rows_html += (
+                f'<tr>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">{esc(label)}</td>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">'
+                f'{esc(row["value"])}{sub}</td>'
+                f'</tr>'
+            )
+        parts.append(
+            '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;'
+            ' margin:10px 0 16px 0; font-size:11pt;">'
+            f'<tr>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Term</td>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Detail</td>'
+            f'</tr>{rows_html}</table>'
+        )
+
+    summary = str(analysis.get("summary") or "").strip()
+    if summary:
+        parts.append(f'<h2 style="color:{COLOR_RESULTS_HEADER}; font-size:15pt; margin:16px 0 6px 0;">Summary</h2>')
+        parts.append(f'<p style="margin:8px 0; line-height:1.5;">{esc(summary)}</p>')
+
+    full_analysis = str(analysis.get("full_analysis") or "").strip()
+    if full_analysis:
+        parts.append(_markdown_to_html(full_analysis))
+
+    raw_text = str(analysis.get("_raw_text") or "").strip()
+    if raw_text:
+        parts.append(
+            f'<h2 style="color:{COLOR_FAILURE}; font-size:15pt; margin:16px 0 6px 0;">'
+            'Raw model output (unparseable)</h2>'
+            f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt;">The model did not return valid JSON. '
+            'Its full response is preserved verbatim below.</p>'
+            f'<pre style="white-space:pre-wrap; font-size:10pt; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' padding:10px; border:1px solid #D5E0D8;">{esc(raw_text)}</pre>'
+        )
+
+    if asx_url:
+        parts.append(
+            f'<p style="margin:16px 0 0 0; font-size:10pt;">Source announcement (ASX): '
+            f'<a href="{esc(asx_url)}">{esc(asx_url)}</a></p>'
+        )
+
+    return (
+        '<html><head><meta charset="utf-8">'
+        f'<title>{esc(title)}</title></head>'
+        '<body style="font-family:Arial, sans-serif; font-size:11pt; color:#111827;">'
+        + "".join(parts) +
+        "</body></html>"
+    )
+
+
+# --- EODHD prior-balance-sheet enrichment for the fundraising card ----------
+# A raise announcement almost never restates the company's prior debt profile,
+# so the LLM honestly writes "not disclosed in this announcement". This fills
+# that gap from the latest reported balance sheet (EODHD) — a *prior* baseline,
+# clearly labelled as from EODHD not the announcement, so the before->after the
+# user actually wants ("debt/equity moves from X to Z") is grounded in real
+# numbers rather than guessed. Best-effort: if EODHD is unconfigured or fails,
+# the card renders exactly as before.
+
+def _fmt_money(value: Optional[float], currency: str = "") -> str:
+    """Compact money, e.g. US$1.5bn / US$950m / -US$120m. Never converts."""
+    if value is None:
+        return "n/a"
+    prefix = CURRENCY_PREFIXES.get(str(currency or "").upper(), "")
+    av = abs(value)
+    sign = "-" if value < 0 else ""
+    if av >= 1e9:
+        num = f"{av / 1e9:.1f}bn"
+    elif av >= 1e6:
+        num = f"{av / 1e6:.0f}m"
+    elif av >= 1e3:
+        num = f"{av / 1e3:.0f}k"
+    else:
+        num = f"{av:.0f}"
+    return f"{sign}{prefix}{num}"
+
+
+def fetch_debt_profile(ticker: str) -> Optional[dict]:
+    """Latest reported debt/leverage snapshot for *ticker* from EODHD, as a
+    plain dict (JSON- and prompt-friendly), or None on any failure. Bob tickers
+    are ASX, so the EODHD symbol defaults to the .AU suffix."""
+    try:
+        from shared import eodhd
+        if not eodhd.is_configured():
+            return None
+        profile = eodhd.debt_profile(eodhd.symbol(ticker))
+    except Exception as e:  # EODHDNotConfigured/NotCovered/HTTP/parse — never fatal
+        log(f"[eodhd] debt profile unavailable for {ticker}: {type(e).__name__}: {e}")
+        return None
+    if profile.gross_debt is None and profile.net_debt is None and profile.total_equity is None:
+        return None
+    return {
+        "as_of": profile.as_of, "period": profile.period, "currency": profile.currency,
+        "gross_debt": profile.gross_debt, "cash": profile.cash, "net_debt": profile.net_debt,
+        "total_equity": profile.total_equity, "ebitda": profile.ebitda,
+        "net_debt_to_ebitda": profile.net_debt_to_ebitda, "gearing": profile.gearing,
+        "source": profile.source,
+    }
+
+
+def _debt_profile_card_line(p: dict) -> str:
+    """One dense line for the email card / dashboard."""
+    ccy = p.get("currency") or ""
+    parts: List[str] = []
+    if p.get("net_debt") is not None:
+        s = f"Net debt {_fmt_money(p['net_debt'], ccy)}"
+        if p.get("net_debt_to_ebitda") is not None:
+            s += f" ({p['net_debt_to_ebitda']:.1f}x EBITDA)"
+        parts.append(s)
+    elif p.get("gross_debt") is not None:
+        parts.append(f"Gross debt {_fmt_money(p['gross_debt'], ccy)}")
+    if p.get("total_equity") is not None:
+        parts.append(f"equity {_fmt_money(p['total_equity'], ccy)}")
+    if p.get("gearing") is not None:
+        parts.append(f"gearing {p['gearing'] * 100:.0f}%")
+    return "; ".join(parts) or "see analysis"
+
+
+def _debt_profile_sub(p: dict) -> str:
+    return f"EODHD, as of {p.get('as_of')} ({p.get('period')})"
+
+
+def _debt_profile_prompt_block(p: dict) -> str:
+    """Context appended to the fundraise LLM call so its before->after is
+    grounded in the real prior balance sheet."""
+    ccy = p.get("currency") or ""
+    def m(k):
+        return _fmt_money(p.get(k), ccy) if p.get(k) is not None else "n/a"
+    nd_eb = f"{p['net_debt_to_ebitda']:.1f}x" if p.get("net_debt_to_ebitda") is not None else "n/a"
+    gearing = f"{p['gearing'] * 100:.0f}%" if p.get("gearing") is not None else "n/a"
+    return (
+        f"\n\nPRIOR BALANCE SHEET (from EODHD, latest reported, as of {p.get('as_of')} "
+        f"[{p.get('period')}], {ccy} — NOT from this announcement):\n"
+        f"- Gross debt: {m('gross_debt')}\n- Cash: {m('cash')}\n- Net debt: {m('net_debt')}\n"
+        f"- Total equity: {m('total_equity')}\n- EBITDA: {m('ebitda')}\n"
+        f"- Net Debt/EBITDA: {nd_eb}\n- Gearing (net debt / equity): {gearing}\n"
+        "You MAY use these to frame the before->after in the 'Balance sheet impact' "
+        "section of full_analysis: if the raise is NEW debt, gross/net debt and "
+        "Net Debt/EBITDA rise by the raised amount; if pure refinancing, roughly "
+        "neutral. Label them as the latest reported balance sheet (EODHD), not from "
+        "this announcement, and still flag what the announcement itself does not "
+        "confirm. Do NOT put these prior figures in the quick_take fields unless the "
+        "announcement also states them."
+    )
+
+
+def build_fundraise_block(
+    ticker: str,
+    analysis: dict,
+    asx_url: str,
+    announced: str = "",
+) -> Dict[str, str]:
+    """Render the CAPITAL_OR_DEBT_RAISE digest block as {"text": ..., "html": ...}.
+
+    Same phone-first, table-only, inline-styles card as build_results_block and
+    build_remuneration_block (email clients strip <style> and mishandle
+    flex/grid). The long-form analysis is not in the email — it is the attached
+    PDF. This is the fix for the old wall-of-text rendering.
+    """
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or (
+        RESULTS_STATUS_FAILED if _is_llm_failure(analysis) else RESULTS_STATUS_OK
+    )
+    failed = status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR)
+    esc = htmlmod.escape
+
+    title = _fundraise_title(ticker, analysis)
+    context = _fundraise_context_line(analysis)
+    summary = str(analysis.get("summary") or "").strip() or "No summary returned."
+    verdict_label, verdict_colour = _fundraise_verdict(analysis)
+    rows = [(label, _fundraise_quick_take_row(analysis, key))
+            for key, label in FUNDRAISE_QUICK_TAKE_ROWS]
+
+    # EODHD prior balance sheet (if available) — a *prior* leverage baseline the
+    # announcement rarely restates, appended as one extra row so the reader sees
+    # the real before figure next to the raise.
+    profile = analysis.get("debt_profile") if isinstance(analysis.get("debt_profile"), dict) else None
+    if profile:
+        rows = rows + [("Prior balance sheet",
+                        {"value": _debt_profile_card_line(profile), "sub": _debt_profile_sub(profile)})]
+
+    # ---- plain text ----------------------------------------------------
+    text_lines: List[str] = []
+    if failed:
+        text_lines.append(f"{RESULTS_FAILURE_BADGE} — {title}")
+    else:
+        text_lines.append(title)
+    text_lines.append(f"{context}  [{verdict_label}]")
+    if announced:
+        text_lines.append(_announced_text_line(announced))
+    text_lines.append("")
+    for label, row in rows:
+        text_lines.append(f"  {label:<16} {row['value']}")
+        if row["sub"]:
+            text_lines.append(f"                   ({row['sub']})")
+    text_lines.append("")
+    text_lines.append(summary)
+    text_lines.append("")
+    if asx_url:
+        text_lines.append(f"Source announcement (ASX): {asx_url}")
+    text_lines.append("")
+
+    # ---- html ----------------------------------------------------------
+    badge = RESULTS_FAILURE_BADGE if failed else "HIGH IMPACT"
+    badge_bg = COLOR_FAILURE if failed else COLOR_HIGH_IMPACT
+    badge_fg = "#FFFFFF" if failed else "#0B1220"
+
+    verdict_pill = (
+        f'<span style="display:inline-block; background:{verdict_colour}; color:#FFFFFF;'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px; margin-left:6px;">{esc(verdict_label)}</span>'
+    )
+
+    metric_rows_html = ""
+    for i, (label, row) in enumerate(rows):
+        bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else COLOR_RESULTS_CARD
+        sub_html = (
+            f'<div style="font-size:11px; color:{COLOR_RESULTS_MUTED}; margin-top:2px;">'
+            f'{esc(row["sub"])}</div>' if row["sub"] else ""
+        )
+        metric_rows_html += (
+            f'<tr>'
+            f'<td valign="top" style="background:{bg}; padding:11px 14px; font-size:13px;'
+            f' line-height:1.3; color:{COLOR_RESULTS_LABEL}; font-family:{EMAIL_FONT};'
+            f' white-space:nowrap; width:96px;">{esc(label)}</td>'
+            f'<td style="background:{bg}; padding:11px 14px; font-size:14px; line-height:1.35;'
+            f' color:{COLOR_RESULTS_VALUE}; font-weight:700; font-family:{EMAIL_FONT};">'
+            f'{esc(row["value"])}{sub_html}</td>'
+            f'</tr>'
+        )
+
+    def _link_row(label: str, href: str) -> str:
+        return (
+            f'<tr><td colspan="2" style="padding:0 14px 10px 14px; font-family:{EMAIL_FONT};">'
+            f'<a href="{esc(href)}" style="display:block; padding:11px 12px; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' border:1px solid #D5E0D8; border-radius:8px; color:{COLOR_RESULTS_HEADER};'
+            f' font-size:14px; font-weight:700; text-decoration:none;">{esc(label)} &rsaquo;</a>'
+            f'</td></tr>'
+        )
+
+    pdf_note_row = (
+        f'<tr><td colspan="2" style="padding:10px 14px; background:{COLOR_RESULTS_ROW_SHADE};'
+        f' color:{COLOR_RESULTS_MUTED}; font-family:{EMAIL_FONT};'
+        f' font-size:13px;">📎 Full raise analysis PDF attached to this email</td></tr>'
+    )
+    links_html = pdf_note_row
+    if asx_url:
+        links_html += _link_row("Source announcement (ASX)", asx_url)
+
+    html = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"'
+        f' style="border-collapse:collapse; margin:14px 0;"><tr><td align="center">'
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360"'
+        f' style="width:100%; max-width:360px; border-collapse:collapse;'
+        f' background:{COLOR_RESULTS_CARD}; border-radius:10px; overflow:hidden;">'
+        f'<tr><td colspan="2" style="background:{COLOR_RESULTS_HEADER}; padding:13px 14px;'
+        f' font-family:{EMAIL_FONT};">'
+        f'<span style="display:inline-block; background:{badge_bg}; color:{badge_fg};'
+        f' font-size:10px; font-weight:800; letter-spacing:0.8px; padding:3px 7px;'
+        f' border-radius:4px;">{esc(badge)}</span>'
+        f'{verdict_pill}'
+        f'<div style="color:#FFFFFF; font-size:17px; font-weight:800; margin-top:7px;">{esc(title)}</div>'
+        f'<div style="color:{COLOR_RESULTS_HEADER_SUB}; font-size:12px; margin-top:3px;">{esc(context)}</div>'
+        f'{_announced_html_line(announced)}'
+        f'</td></tr>'
+        f'{metric_rows_html}'
+        f'<tr><td colspan="2" style="padding:13px 14px; font-family:{EMAIL_FONT}; font-size:15px;'
+        f' line-height:1.5; color:{COLOR_RESULTS_VALUE}; border-top:2px solid {COLOR_RESULTS_HEADER};">'
+        f'{esc(summary)}</td></tr>'
+        f'{links_html}'
+        f'</table></td></tr></table>'
+    )
+    return {"text": "\n".join(text_lines), "html": html}
+
+
+def build_fundraise_doc_html(
+    ticker: str,
+    analysis: dict,
+    asx_url: str = "",
+) -> str:
+    """Build the HTML the attached PDF is rendered from. Preserves the raw
+    model text verbatim on a parse failure, same rule as the results Doc."""
+    analysis = analysis or {}
+    status = str(analysis.get("_status") or "").strip() or RESULTS_STATUS_OK
+    esc = htmlmod.escape
+    title = _fundraise_title(ticker, analysis)
+    context = _fundraise_context_line(analysis)
+    verdict_label, verdict_colour = _fundraise_verdict(analysis)
+
+    parts: List[str] = [
+        f'<h1 style="color:{COLOR_RESULTS_HEADER}; font-size:19pt; margin:0 0 2px 0;">{esc(title)}</h1>',
+        f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt; margin:0 0 14px 0;">'
+        f'{esc(context)} &nbsp;|&nbsp; Verdict: '
+        f'<span style="color:{verdict_colour}; font-weight:700;">{esc(verdict_label)}</span>'
+        f' &nbsp;|&nbsp; Generated by {esc(BOB_NAME)} {esc(VERSION_LABEL)} '
+        f'on {today_sgt_date().isoformat()} (SGT)</p>',
+    ]
+
+    if status in (RESULTS_STATUS_FAILED, RESULTS_STATUS_PARSE_ERROR):
+        parts.append(
+            f'<p style="background:#FEE2E2; border:1px solid {COLOR_FAILURE}; color:{COLOR_FAILURE};'
+            f' padding:10px 12px; font-weight:700;">{esc(RESULTS_FAILURE_BADGE)}: '
+            f'{esc(str(analysis.get("summary", "")))}</p>'
+        )
+
+    if isinstance(analysis.get("quick_take"), dict):
+        rows_html = ""
+        for i, (key, label) in enumerate(FUNDRAISE_QUICK_TAKE_ROWS):
+            row = _fundraise_quick_take_row(analysis, key)
+            bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else "#FFFFFF"
+            sub = (f' <span style="color:{COLOR_RESULTS_MUTED}; font-size:9pt;">'
+                   f'({esc(row["sub"])})</span>') if row["sub"] else ""
+            rows_html += (
+                f'<tr>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">{esc(label)}</td>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">'
+                f'{esc(row["value"])}{sub}</td>'
+                f'</tr>'
+            )
+        parts.append(
+            '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;'
+            ' margin:10px 0 16px 0; font-size:11pt;">'
+            f'<tr>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Term</td>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Detail</td>'
+            f'</tr>{rows_html}</table>'
+        )
+
+    profile = analysis.get("debt_profile") if isinstance(analysis.get("debt_profile"), dict) else None
+    if profile:
+        ccy = profile.get("currency") or ""
+        def _pv(key, fmt=None):
+            v = profile.get(key)
+            if v is None:
+                return "n/a"
+            return fmt(v) if fmt else _fmt_money(v, ccy)
+        bs_rows = [
+            ("Gross debt", _pv("gross_debt")),
+            ("Cash & equivalents", _pv("cash")),
+            ("Net debt", _pv("net_debt")),
+            ("Total equity", _pv("total_equity")),
+            ("EBITDA", _pv("ebitda")),
+            ("Net Debt / EBITDA", _pv("net_debt_to_ebitda", lambda v: f"{v:.1f}x")),
+            ("Gearing (net debt / equity)", _pv("gearing", lambda v: f"{v * 100:.0f}%")),
+        ]
+        bs_html = ""
+        for i, (label, val) in enumerate(bs_rows):
+            bg = COLOR_RESULTS_ROW_SHADE if i % 2 == 0 else "#FFFFFF"
+            bs_html += (
+                f'<tr><td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8;">{esc(label)}</td>'
+                f'<td style="background:{bg}; padding:7px 10px; border:1px solid #D5E0D8; text-align:right;'
+                f' font-weight:700;">{esc(val)}</td></tr>'
+            )
+        parts.append(
+            f'<h2 style="color:{COLOR_RESULTS_HEADER}; font-size:15pt; margin:16px 0 4px 0;">'
+            'Prior balance sheet</h2>'
+            f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt; margin:0 0 8px 0;">'
+            f'Latest reported balance sheet from EODHD, as of {esc(str(profile.get("as_of")))} '
+            f'({esc(str(profile.get("period")))}), {esc(ccy)}. This is the leverage baseline '
+            '<strong>before</strong> this raise, not a figure from the announcement.</p>'
+            '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;'
+            ' margin:4px 0 16px 0; font-size:11pt;">'
+            f'<tr><td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8;">Balance sheet item</td>'
+            f'<td style="background:{COLOR_RESULTS_HEADER}; color:#FFFFFF; font-weight:700; padding:7px 10px; border:1px solid #D5E0D8; text-align:right;">Latest reported</td>'
+            f'</tr>{bs_html}</table>'
+        )
+
+    summary = str(analysis.get("summary") or "").strip()
+    if summary:
+        parts.append(f'<h2 style="color:{COLOR_RESULTS_HEADER}; font-size:15pt; margin:16px 0 6px 0;">Summary</h2>')
+        parts.append(f'<p style="margin:8px 0; line-height:1.5;">{esc(summary)}</p>')
+
+    full_analysis = str(analysis.get("full_analysis") or "").strip()
+    if full_analysis:
+        parts.append(_markdown_to_html(full_analysis))
+
+    raw_text = str(analysis.get("_raw_text") or "").strip()
+    if raw_text:
+        parts.append(
+            f'<h2 style="color:{COLOR_FAILURE}; font-size:15pt; margin:16px 0 6px 0;">'
+            'Raw model output (unparseable)</h2>'
+            f'<p style="color:{COLOR_RESULTS_MUTED}; font-size:10pt;">The model did not return valid JSON. '
+            'Its full response is preserved verbatim below.</p>'
+            f'<pre style="white-space:pre-wrap; font-size:10pt; background:{COLOR_RESULTS_ROW_SHADE};'
+            f' padding:10px; border:1px solid #D5E0D8;">{esc(raw_text)}</pre>'
+        )
+
+    if asx_url:
+        parts.append(
+            f'<p style="margin:16px 0 0 0; font-size:10pt;">Source announcement (ASX): '
+            f'<a href="{esc(asx_url)}">{esc(asx_url)}</a></p>'
+        )
+
+    return (
+        '<html><head><meta charset="utf-8">'
+        f'<title>{esc(title)}</title></head>'
+        '<body style="font-family:Arial, sans-serif; font-size:11pt; color:#111827;">'
+        + "".join(parts) +
+        "</body></html>"
+    )
+
+
+def generate_analysis_pdf(
+    ticker: str,
+    period: str,
+    body_html: str,
+) -> Optional[Path]:
+    """Generate a professional PDF from the analysis HTML and return its file path.
+
+    Returns None if weasyprint is not installed; raises on actual errors.
+    The PDF is saved to a temporary file and should be attached to the email.
+    """
+    if HTML is None:
+        log(f"[PDF] weasyprint not installed — skipping PDF generation for {ticker}")
+        return None
+
+    try:
+        # Add CSS for professional styling
+        css_string = """
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            color: #1f2937;
+            margin: 12pt;
+        }
+        h1 {
+            font-size: 24pt;
+            color: #1e3a8a;
+            margin: 0 0 4pt 0;
+            font-weight: 700;
+        }
+        h2 {
+            font-size: 14pt;
+            color: #1e3a8a;
+            margin: 20pt 0 8pt 0;
+            font-weight: 700;
+        }
+        h3 {
+            font-size: 12pt;
+            color: #1e3a8a;
+            margin: 14pt 0 6pt 0;
+            font-weight: 700;
+        }
+        h4 {
+            font-size: 11pt;
+            color: #374151;
+            margin: 10pt 0 4pt 0;
+            font-weight: 700;
+        }
+        p {
+            margin: 8pt 0;
+            line-height: 1.6;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 12pt 0;
+            font-size: 10pt;
+        }
+        table td, table th {
+            border: 1px solid #d1d5db;
+            padding: 6pt 8pt;
+        }
+        table th {
+            background-color: #1e3a8a;
+            color: white;
+            font-weight: 700;
+        }
+        table tr:nth-child(even) {
+            background-color: #f3f4f6;
+        }
+        ul, ol {
+            margin: 8pt 0;
+            padding-left: 24pt;
+            line-height: 1.6;
+        }
+        li {
+            margin: 4pt 0;
+        }
+        code {
+            background-color: #f3f4f6;
+            padding: 2pt 4pt;
+            font-family: 'Courier New', monospace;
+            font-size: 10pt;
+        }
+        pre {
+            background-color: #f3f4f6;
+            padding: 10pt;
+            border: 1px solid #d1d5db;
+            font-family: 'Courier New', monospace;
+            font-size: 9pt;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        a {
+            color: #1e3a8a;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        """
+
+        # Create HTML document with embedded CSS
+        full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>{css_string}</style>
+</head>
+<body>
+{body_html}
+</body>
+</html>"""
+
+        # Generate PDF to temporary file
+        temp_pdf = Path(tempfile.gettempdir()) / f"{ticker}_{period}_{today_sgt_date().isoformat()}.pdf"
+        HTML(string=full_html).write_pdf(str(temp_pdf))
+
+        log(f"[PDF] Generated {ticker} analysis PDF: {temp_pdf} ({temp_pdf.stat().st_size} bytes)")
+        return temp_pdf
+
+    except Exception as e:
+        log(f"[PDF] Error generating PDF for {ticker}: {type(e).__name__}: {e}")
+        return None
+
+
+def create_analysis_doc(
+    ticker: str,
+    period: str,
+    body_html: str,
+    folder_id: str,
+) -> str:
+    """Create a native Google Doc from *body_html* and return its webViewLink.
+
+    Uploading HTML with mimeType application/vnd.google-apps.document makes
+    Drive convert it to a real Doc, which reflows on a phone — a PDF or docx
+    would not. Returns "" if Drive isn't configured; raises only on a genuine
+    API error (callers treat Doc creation as non-fatal).
+
+    Uses OAuth-preferred auth (see drive_service): with OAuth the file is
+    owned by the human user and lives on the user's Drive quota, so no
+    per-file permission grant is needed and the webViewLink resolves for the
+    owner immediately.
+    """
+    if not folder_id:
+        return ""
+    from googleapiclient.http import MediaInMemoryUpload
+
+    service = drive_service()
+    name = f"{ticker} {period or 'results'} analysis {today_sgt_date().isoformat()}"
+    metadata = {
+        "name": name,
+        "parents": [folder_id],
+        "mimeType": "application/vnd.google-apps.document",
+    }
+    media = MediaInMemoryUpload(body_html.encode("utf-8"), mimetype="text/html", resumable=False)
+    created = service.files().create(
+        body=metadata,
+        media_body=media,
+        fields="id,webViewLink",
+        # Works for both My Drive (with OAuth) and Shared Drives — safe to
+        # always pass. Without it the v3 API silently refuses to touch
+        # anything outside plain My Drive.
+        supportsAllDrives=True,
+    ).execute()
+    file_id = created.get("id") or ""
+    if not file_id:
+        return ""
+    link = created.get("webViewLink") or f"https://docs.google.com/document/d/{file_id}/view"
+    log(f"Analysis Doc created for {ticker}: {link}")
+    return link
+
+
+def deep_acquisition_memo(
+    ticker: str, title: str, text: str, counters: Dict, pdf_path: Optional[Path] = None,
+) -> dict:
+    """One structured LLM call for an acquisition announcement. Same shape as
+    deep_capital_memo: streaming (large enough to trip the SDK's non-
+    streaming ceiling), _status-tagged return dict, raw text preserved on a
+    parse failure so a half-broken digest never renders clean.
+    """
+    if pdf_path and pdf_path.exists():
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "Please analyse the attached acquisition announcement as the primary "
+            "source. Use only figures it actually discloses."
+        )
+        out = llm_chat(
+            ACQUISITION_PROMPT, user, counters,
+            pdf_path=pdf_path, fallback_text=text,
+            max_tokens=ACQUISITION_MAX_TOKENS,
+        )
+    elif is_meaningful_text(text, min_chars=900):
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "NOTE: no PDF could be attached — the text below was extracted with pypdf, "
+            "so table layout may be mangled. Prefer \"not disclosed in this announcement\" "
+            "over any figure you cannot read with confidence.\n\n"
+            f"Announcement text:\n{text}"
+        )
+        out = llm_chat(ACQUISITION_PROMPT, user, counters, max_tokens=ACQUISITION_MAX_TOKENS)
+    else:
+        return {
+            "summary": "No meaningful announcement text or PDF available for analysis. Open the announcement manually.",
+            "_status": RESULTS_STATUS_NO_CONTENT,
+        }
+
+    if out == LLM_SKIPPED:
+        marker = _skip_marker("summary")
+        marker["_status"] = RESULTS_STATUS_SKIPPED
+        return marker
+
+    if out == LLM_FAILED:
+        marker = _failed_marker("summary", counters)
+        marker["_status"] = RESULTS_STATUS_FAILED
+        return marker
+
+    truncated = (counters.get("last_stop_reason") or "").lower() == "max_tokens"
+    parsed = _parse_analysis_json(out, allow_repair=not truncated)
+    if not parsed:
+        stop_reason = (counters.get("last_stop_reason") or "").lower()
+        if stop_reason == "max_tokens":
+            detail = (
+                f"model output was truncated at max_tokens="
+                f"{ACQUISITION_MAX_TOKENS} — raise CLAUDE_ACQUISITION_MAX_TOKENS"
+            )
+        else:
+            detail = "model returned unparseable output (not valid JSON)"
+        log(
+            f"ERROR: acquisition JSON parse failed for {ticker} — "
+            f"{len(out)} chars, stop_reason={stop_reason or 'unknown'}"
+        )
+        return {
+            "summary": f"{LLM_FAILURE_FLAG} ({detail}). Raw model output attached to this email as a PDF.",
+            "_status": RESULTS_STATUS_PARSE_ERROR,
+            "_raw_text": out,
+        }
+
+    parsed["_status"] = RESULTS_STATUS_OK
+    return parsed
+
+
+def deep_capital_memo(
+    ticker: str, title: str, text: str, counters: Dict, pdf_path: Optional[Path] = None,
+    debt_profile: Optional[dict] = None,
+) -> dict:
+    """One structured LLM call for a capital raise / debt raise. Same shape as
+    deep_results_analysis / deep_remuneration_memo: streaming (large enough to
+    trip the SDK's non-streaming ceiling), _status-tagged return dict, raw text
+    preserved on a parse failure so a half-broken digest never renders clean.
+
+    Native PDF in when available so the term sheet / tranche table can be read;
+    extracted text as the fallback with the model told to prefer 'not disclosed'
+    over a misread figure.
+
+    *debt_profile* — the company's latest reported balance sheet from EODHD
+    (``fetch_debt_profile``), injected as context so the before->after in the
+    analysis is grounded in real prior figures rather than guessed. Optional and
+    best-effort: None when EODHD is unconfigured or has no data.
+    """
+    profile_block = _debt_profile_prompt_block(debt_profile) if debt_profile else ""
+    if pdf_path and pdf_path.exists():
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "Please analyse the attached capital raise / debt raise announcement "
+            "as the primary source. Use only figures it actually discloses; where "
+            "a balance-sheet figure (prior debt maturity profile, current net debt, "
+            "leverage before/after) is not in the document, say so and list it as a "
+            "question rather than estimating it."
+            + profile_block
+        )
+        out = llm_chat(
+            FUNDRAISE_PROMPT, user, counters,
+            pdf_path=pdf_path, fallback_text=text,
+            max_tokens=FUNDRAISE_MAX_TOKENS,
+        )
+    elif is_meaningful_text(text, min_chars=900):
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "NOTE: no PDF could be attached — the text below was extracted with pypdf, "
+            "so table layout may be mangled. Prefer 'not disclosed' over any figure you "
+            "cannot read with confidence.\n\n"
+            f"Announcement text:\n{text}"
+            + profile_block
+        )
+        out = llm_chat(FUNDRAISE_PROMPT, user, counters, max_tokens=FUNDRAISE_MAX_TOKENS)
+    else:
+        return {
+            "summary": "No meaningful announcement text or PDF available for analysis. Open the announcement manually.",
+            "_status": RESULTS_STATUS_NO_CONTENT,
+        }
+
+    if out == LLM_SKIPPED:
+        marker = _skip_marker("summary")
+        marker["_status"] = RESULTS_STATUS_SKIPPED
+        return marker
+
+    if out == LLM_FAILED:
+        marker = _failed_marker("summary", counters)
+        marker["_status"] = RESULTS_STATUS_FAILED
+        return marker
+
+    truncated = (counters.get("last_stop_reason") or "").lower() == "max_tokens"
+    parsed = _parse_analysis_json(out, allow_repair=not truncated)
+    if not parsed:
+        stop_reason = (counters.get("last_stop_reason") or "").lower()
+        if stop_reason == "max_tokens":
+            detail = (
+                f"model output was truncated at max_tokens="
+                f"{FUNDRAISE_MAX_TOKENS} — raise CLAUDE_FUNDRAISE_MAX_TOKENS"
+            )
+        else:
+            detail = "model returned unparseable output (not valid JSON)"
+        log(
+            f"ERROR: fundraise JSON parse failed for {ticker} — "
+            f"{len(out)} chars, stop_reason={stop_reason or 'unknown'}"
+        )
+        return {
+            "summary": f"{LLM_FAILURE_FLAG} ({detail}). Raw model output attached to this email as a PDF.",
+            "_status": RESULTS_STATUS_PARSE_ERROR,
+            "_raw_text": out,
+        }
+
+    parsed["_status"] = RESULTS_STATUS_OK
+    return parsed
+
+
+def deep_trading_update_memo(
+    ticker: str, title: str, text: str, counters: Dict, pdf_path: Optional[Path] = None,
+) -> dict:
+    """One structured LLM call for a trading update / guidance announcement.
+    Same shape as deep_capital_memo: streaming, _status-tagged, raw text
+    preserved on a parse failure.
+
+    The model decides "has_data" — whether this document contains any actual
+    trading figures, or is purely a notice that a trading update is coming on
+    some future date (MSV's "FY27 Q1 results briefing" was the latter). Every
+    non-"ok" status forces has_data=True so a genuine skip/failure/no-content
+    outcome is never silently swallowed as if it were a quiet notification —
+    only a successfully parsed "has_data": false from the model itself
+    suppresses the card.
+    """
+    if pdf_path and pdf_path.exists():
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "Please analyse the attached trading update / guidance announcement "
+            "as the primary source. Use only figures it actually discloses."
+        )
+        out = llm_chat(
+            TRADING_UPDATE_PROMPT, user, counters,
+            pdf_path=pdf_path, fallback_text=text,
+            max_tokens=TRADING_UPDATE_MAX_TOKENS,
+        )
+    elif is_meaningful_text(text, min_chars=600):
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "NOTE: no PDF could be attached — the text below was extracted with pypdf, "
+            "so table layout may be mangled. Prefer \"not disclosed\" over any figure you "
+            "cannot read with confidence.\n\n"
+            f"Announcement text:\n{text}"
+        )
+        out = llm_chat(TRADING_UPDATE_PROMPT, user, counters, max_tokens=TRADING_UPDATE_MAX_TOKENS)
+    else:
+        return {
+            "has_data": True,
+            "summary": "No meaningful announcement text or PDF available for analysis. Open the announcement manually.",
+            "_status": RESULTS_STATUS_NO_CONTENT,
+        }
+
+    if out == LLM_SKIPPED:
+        marker = _skip_marker("summary")
+        marker["_status"] = RESULTS_STATUS_SKIPPED
+        marker["has_data"] = True
+        return marker
+
+    if out == LLM_FAILED:
+        marker = _failed_marker("summary", counters)
+        marker["_status"] = RESULTS_STATUS_FAILED
+        marker["has_data"] = True
+        return marker
+
+    truncated = (counters.get("last_stop_reason") or "").lower() == "max_tokens"
+    parsed = _parse_analysis_json(out, allow_repair=not truncated)
+    if not parsed:
+        stop_reason = (counters.get("last_stop_reason") or "").lower()
+        if stop_reason == "max_tokens":
+            detail = (
+                f"model output was truncated at max_tokens="
+                f"{TRADING_UPDATE_MAX_TOKENS} — raise CLAUDE_TRADING_UPDATE_MAX_TOKENS"
+            )
+        else:
+            detail = "model returned unparseable output (not valid JSON)"
+        log(
+            f"ERROR: trading update JSON parse failed for {ticker} — "
+            f"{len(out)} chars, stop_reason={stop_reason or 'unknown'}"
+        )
+        return {
+            "has_data": True,
+            "summary": f"{LLM_FAILURE_FLAG} ({detail}). Raw model output attached to this email as a PDF.",
+            "_status": RESULTS_STATUS_PARSE_ERROR,
+            "_raw_text": out,
+        }
+
+    parsed["_status"] = RESULTS_STATUS_OK
+    if "has_data" not in parsed:
+        parsed["has_data"] = True
+    return parsed
+
+
+def deep_4c_memo(
+    ticker: str, title: str, text: str, counters: Dict, pdf_path: Optional[Path] = None,
+) -> dict:
+    """One structured LLM call for an Appendix 4C / 5B quarterly cash flow
+    report. Same shape and the same has_data gate as deep_trading_update_memo
+    — see its docstring for why every non-"ok" status forces has_data=True.
+    """
+    if pdf_path and pdf_path.exists():
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "Please analyse the attached Appendix 4C / 5B quarterly cash flow report "
+            "as the primary source. Use only figures it actually discloses."
+        )
+        out = llm_chat(
+            QUARTERLY_4C_PROMPT, user, counters,
+            pdf_path=pdf_path, fallback_text=text,
+            max_tokens=QUARTERLY_4C_MAX_TOKENS,
+        )
+    elif is_meaningful_text(text, min_chars=600):
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "NOTE: no PDF could be attached — the text below was extracted with pypdf, "
+            "so table layout may be mangled. Prefer \"n/a\" over any figure you cannot "
+            "read with confidence.\n\n"
+            f"Announcement text:\n{text}"
+        )
+        out = llm_chat(QUARTERLY_4C_PROMPT, user, counters, max_tokens=QUARTERLY_4C_MAX_TOKENS)
+    else:
+        return {
+            "has_data": True,
+            "summary": "No meaningful announcement text or PDF available for analysis. Open the announcement manually.",
+            "_status": RESULTS_STATUS_NO_CONTENT,
+        }
+
+    if out == LLM_SKIPPED:
+        marker = _skip_marker("summary")
+        marker["_status"] = RESULTS_STATUS_SKIPPED
+        marker["has_data"] = True
+        return marker
+
+    if out == LLM_FAILED:
+        marker = _failed_marker("summary", counters)
+        marker["_status"] = RESULTS_STATUS_FAILED
+        marker["has_data"] = True
+        return marker
+
+    truncated = (counters.get("last_stop_reason") or "").lower() == "max_tokens"
+    parsed = _parse_analysis_json(out, allow_repair=not truncated)
+    if not parsed:
+        stop_reason = (counters.get("last_stop_reason") or "").lower()
+        if stop_reason == "max_tokens":
+            detail = (
+                f"model output was truncated at max_tokens="
+                f"{QUARTERLY_4C_MAX_TOKENS} — raise CLAUDE_4C_MAX_TOKENS"
+            )
+        else:
+            detail = "model returned unparseable output (not valid JSON)"
+        log(
+            f"ERROR: 4C JSON parse failed for {ticker} — "
+            f"{len(out)} chars, stop_reason={stop_reason or 'unknown'}"
+        )
+        return {
+            "has_data": True,
+            "summary": f"{LLM_FAILURE_FLAG} ({detail}). Raw model output attached to this email as a PDF.",
+            "_status": RESULTS_STATUS_PARSE_ERROR,
+            "_raw_text": out,
+        }
+
+    parsed["_status"] = RESULTS_STATUS_OK
+    if "has_data" not in parsed:
+        parsed["has_data"] = True
+    return parsed
+
+
+def deep_price_sensitive_memo(
+    ticker: str, title: str, text: str, counters: Dict, pdf_path: Optional[Path] = None,
+) -> dict:
+    if pdf_path and pdf_path.exists():
+        user = f"Ticker: {ticker}\nTitle: {title}\n\nPlease analyse the attached ASX price-sensitive announcement PDF."
+        out = llm_chat(PRICE_SENSITIVE_PROMPT, user, counters, pdf_path=pdf_path, fallback_text=text)
+    elif is_meaningful_text(text, min_chars=600):
+        user = f"Ticker: {ticker}\nTitle: {title}\n\nAnnouncement text:\n{text}"
+        out = llm_chat(PRICE_SENSITIVE_PROMPT, user, counters)
+    else:
+        return {"what_happened": "Could not extract meaningful announcement text. Open the link and review manually."}
+    if out == LLM_SKIPPED:
+        return _skip_marker("what_happened")
+    if out == LLM_FAILED:
+        return _failed_marker("what_happened", counters)
+    parsed = _parse_analysis_json(out)
+    return parsed if parsed else {"what_happened": out}
+
+
+def deep_results_analysis(
+    ticker: str,
+    report_text: str,
+    deck_text: str,
+    counters: Dict,
+    report_pdf: Optional[Path] = None,
+    deck_pdf: Optional[Path] = None,
+) -> dict:
+    has_pdf = (report_pdf and report_pdf.exists()) or (deck_pdf and deck_pdf.exists())
+    if has_pdf:
+        # Send BOTH the financial report and the investor deck as native PDF
+        # document blocks (not extracted text) so table/chart fidelity is
+        # preserved for both — the deck is often the more table-heavy of
+        # the two. Each falls back independently to its extracted text if
+        # it's individually malformed/too large, or if attaching both would
+        # exceed Claude's combined per-request PDF budget.
+        attachments: List[PdfAttachment] = []
+        if report_pdf and report_pdf.exists():
+            try:
+                attachments.append(PdfAttachment(
+                    name=f"{report_pdf.name} (financial report)",
+                    pdf_bytes=report_pdf.read_bytes(),
+                    fallback_text=report_text,
+                ))
+            except Exception as e:
+                log(f"Could not read report PDF {report_pdf}: {e}")
+        if deck_pdf and deck_pdf.exists() and deck_pdf != report_pdf:
+            try:
+                attachments.append(PdfAttachment(
+                    name=f"{deck_pdf.name} (investor presentation)",
+                    pdf_bytes=deck_pdf.read_bytes(),
+                    fallback_text=deck_text,
+                ))
+            except Exception as e:
+                log(f"Could not read deck PDF {deck_pdf}: {e}")
+        user = f"Ticker: {ticker}\n\nPlease analyse the attached financial results PDF(s) as the primary source."
+        out = llm_chat_with_pdfs(
+            RESULTS_HYFY_PROMPT, user, counters, attachments,
+            max_tokens=RESULTS_MAX_TOKENS,
+        )
+    elif is_meaningful_text(report_text, min_chars=MIN_RESULTS_TEXT_CHARS) or is_meaningful_text(deck_text, min_chars=MIN_RESULTS_TEXT_CHARS):
+        # Text-only fallback: no PDF could be attached natively, so table
+        # fidelity is degraded. Tell the model so it can be conservative
+        # (n/a beats a misread number) rather than guessing off broken tables.
+        user = (
+            f"Ticker: {ticker}\n\n"
+            "NOTE: no PDF could be attached — the text below was extracted with pypdf, "
+            "so table layout may be mangled. Prefer \"n/a\" over any figure you cannot "
+            "read with confidence, and flag the lower confidence in the summary.\n\n"
+            f"=== OFFICIAL REPORT TEXT ===\n{report_text}\n\n"
+            f"=== INVESTOR DECK TEXT ===\n{deck_text}\n"
+        )
+        out = llm_chat(RESULTS_HYFY_PROMPT, user, counters, max_tokens=RESULTS_MAX_TOKENS)
+    else:
+        return {
+            "executive_summary": ["No meaningful report text or PDF available for analysis."],
+            "summary": "No meaningful report text or PDF available for analysis. Open the announcement manually.",
+            "_status": RESULTS_STATUS_NO_CONTENT,
+        }
+
+    if out == LLM_SKIPPED:
+        marker = _skip_marker("executive_summary", as_list=True)
+        marker["summary"] = RESULTS_SKIP_MESSAGE
+        marker["_status"] = RESULTS_STATUS_SKIPPED
+        return marker
+
+    if out == LLM_FAILED:
+        marker = _failed_marker("executive_summary", counters, as_list=True)
+        marker["summary"] = marker["executive_summary"][0]
+        marker["_status"] = RESULTS_STATUS_FAILED
+        return marker
+
+    # A response the API cut off at max_tokens must never be bracket-balanced
+    # back into a "clean" card — its full_analysis stops mid-sentence.
+    truncated = (counters.get("last_stop_reason") or "").lower() == "max_tokens"
+    parsed = _parse_analysis_json(out, allow_repair=not truncated)
+    if not parsed:
+        # The model answered, but not with parseable JSON. Never dress this up
+        # as a clean (if terse) analysis: flag it loudly and keep the raw text
+        # so it can be written to the Doc for manual reading.
+        #
+        # Truncation at max_tokens is by far the most common cause on large
+        # reporters (BHP, CSL) — the JSON ends mid-string somewhere inside
+        # full_analysis and no bracket-balancing can save it. Naming the
+        # cause in the failure text is the difference between "raise the
+        # budget" and "read the raw output to find out what's wrong".
+        stop_reason = (counters.get("last_stop_reason") or "").lower()
+        if stop_reason == "max_tokens":
+            detail = (
+                f"model output was truncated at max_tokens="
+                f"{RESULTS_MAX_TOKENS} — raise CLAUDE_RESULTS_MAX_TOKENS"
+            )
+        else:
+            detail = "model returned unparseable output (not valid JSON)"
+        log(
+            f"ERROR: results JSON parse failed for {ticker} — "
+            f"{len(out)} chars, stop_reason={stop_reason or 'unknown'}"
+        )
+        return {
+            "executive_summary": [f"{LLM_FAILURE_FLAG} ({detail})."],
+            "summary": f"{LLM_FAILURE_FLAG} ({detail}). Raw model output saved to the analysis Doc.",
+            "_status": RESULTS_STATUS_PARSE_ERROR,
+            "_raw_text": out,
+        }
+
+    parsed["_status"] = RESULTS_STATUS_OK
+    return parsed
+
+
+def deep_remuneration_memo(
+    ticker: str,
+    title: str,
+    text: str,
+    counters: Dict,
+    pdf_path: Optional[Path] = None,
+) -> dict:
+    """One structured LLM call for an amended share plan / exec remuneration
+    document. Same shape as deep_results_analysis: streaming (the analysis is
+    large enough to trip the SDK's non-streaming ceiling), _status-tagged
+    return dict, raw text preserved on a parse failure.
+
+    Native PDF in when available so the rules table can be read; extracted
+    text as the fallback with the model told to be conservative about
+    numbers it can't cleanly read.
+    """
+    if pdf_path and pdf_path.exists():
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "Please analyse the attached amended share plan / remuneration document "
+            "as the primary source. Compare against the previous plan where the "
+            "document itself references it; where it does not, note the market-"
+            "practice benchmark and mark parameters that were not disclosed."
+        )
+        out = llm_chat(
+            REMUNERATION_PROMPT, user, counters,
+            pdf_path=pdf_path, fallback_text=text,
+            max_tokens=REMUNERATION_MAX_TOKENS,
+        )
+    elif is_meaningful_text(text, min_chars=900):
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "NOTE: no PDF could be attached — the text below was extracted with pypdf, "
+            "so table layout may be mangled. Prefer 'not disclosed' over any figure you "
+            "cannot read with confidence.\n\n"
+            f"Announcement text:\n{text}"
+        )
+        out = llm_chat(REMUNERATION_PROMPT, user, counters, max_tokens=REMUNERATION_MAX_TOKENS)
+    else:
+        return {
+            "summary": "No meaningful plan text or PDF available for analysis. Open the announcement manually.",
+            "_status": RESULTS_STATUS_NO_CONTENT,
+        }
+
+    if out == LLM_SKIPPED:
+        marker = _skip_marker("summary")
+        marker["_status"] = RESULTS_STATUS_SKIPPED
+        return marker
+
+    if out == LLM_FAILED:
+        marker = _failed_marker("summary", counters)
+        marker["_status"] = RESULTS_STATUS_FAILED
+        return marker
+
+    truncated = (counters.get("last_stop_reason") or "").lower() == "max_tokens"
+    parsed = _parse_analysis_json(out, allow_repair=not truncated)
+    if not parsed:
+        stop_reason = (counters.get("last_stop_reason") or "").lower()
+        if stop_reason == "max_tokens":
+            detail = (
+                f"model output was truncated at max_tokens="
+                f"{REMUNERATION_MAX_TOKENS} — raise CLAUDE_REMUNERATION_MAX_TOKENS"
+            )
+        else:
+            detail = "model returned unparseable output (not valid JSON)"
+        log(
+            f"ERROR: remuneration JSON parse failed for {ticker} — "
+            f"{len(out)} chars, stop_reason={stop_reason or 'unknown'}"
+        )
+        return {
+            "summary": f"{LLM_FAILURE_FLAG} ({detail}). Raw model output attached to this email as a PDF.",
+            "_status": RESULTS_STATUS_PARSE_ERROR,
+            "_raw_text": out,
+        }
+
+    parsed["_status"] = RESULTS_STATUS_OK
+    return parsed
+
+
+def drive_service():
+    """Build a Google Drive API service, preferring OAuth over service-account.
+
+    History that motivated this: service accounts have NO Drive storage
+    quota of their own. Writing into a plain "My Drive" folder — even one
+    that has been *shared with* the service account as Editor — returns
+    HTTP 403 ``Service Accounts do not have storage quota``, because
+    Google needs to charge every new file against some owner's quota. That
+    is exactly what silently killed every Bob upload for weeks: the
+    try/except in ``main()`` swallowed the 403 and the digest looked fine.
+
+    So this function prefers OAuth2 user credentials (client_id +
+    client_secret + refresh_token). Authenticated as the human user, every
+    file created is owned by *them* and lives on *their* quota — no Shared
+    Drive required, works on plain personal Gmail. This is the same
+    pattern Sunday Sally already uses (sunday-sally/src/main.py).
+
+    Falls back to the service account only if OAuth secrets aren't set,
+    with a loud warning so nobody mistakes it for a working configuration.
+    """
+    creds = gdrive.oauth_credentials()
+    if creds is not None:
+        return gdrive.build_service(creds, cache_discovery=False)
+
+    info = gdrive.service_account_info()
+    if info is None:
+        raise RuntimeError(
+            "No Drive credentials set: need either OAuth2 "
+            "(GDRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN) or a service account "
+            "(GDRIVE_SERVICE_ACCOUNT_JSON)"
+        )
+    log(
+        "WARNING: Drive auth is using a service account. Uploads to a plain "
+        "My Drive folder will fail with 403 'Service Accounts do not have "
+        "storage quota'. Set GDRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN to use "
+        "OAuth against the folder's owner instead."
+    )
+    return gdrive.build_service(gdrive.service_account_credentials(info), cache_discovery=False)
+
+
+def likely_results_bundle_items(items_for_ticker: List[Dict]) -> List[Dict]:
+    return [it for it in items_for_ticker if looks_like_results_title(it["title"])]
+
+
+def _item_date(it: Dict) -> dt.date:
+    """Parse an announcement item's dd/mm/yyyy date; dt.date.min if unparseable
+    so undated items sort oldest and never win 'most recent'."""
+    try:
+        return dt.datetime.strptime(str(it.get("date", "")), "%d/%m/%Y").date()
+    except Exception:
+        return dt.date.min
+
+
+def most_recent_results_cluster(items: List[Dict], window_days: int = 14) -> List[Dict]:
+    """From *items*, return only the results-titled announcements belonging to
+    the single most recent reporting event.
+
+    A results release, its investor presentation and the Appendix 4D/4E usually
+    land within a day or two of each other, so everything within *window_days*
+    of the newest results item is one event. Anything older is a prior report,
+    dropped — that's what keeps a 6-month RESULTS_TICKER lookback from bundling
+    last half-year's numbers in with the latest full-year's.
+    """
+    results = [it for it in items if looks_like_results_title(it["title"])]
+    if not results:
+        return []
+    newest = max(_item_date(it) for it in results)
+    # All results items undated (dt.date.min): nothing to cluster on, so keep
+    # them all rather than overflow on the subtraction below.
+    if newest <= dt.date.min + dt.timedelta(days=window_days):
+        return results
+    cutoff = newest - dt.timedelta(days=window_days)
+    return [it for it in results if _item_date(it) >= cutoff]
+
+
+def pick_report_and_deck_text(downloaded_texts: List[Tuple[str, str]]) -> Tuple[str, str]:
+    pres = [(t, x) for (t, x) in downloaded_texts if "presentation" in t.lower() or "deck" in t.lower()]
+    non_pres = [(t, x) for (t, x) in downloaded_texts if (t, x) not in pres]
+    deck = max(pres, key=lambda tx: len(tx[1] or ""), default=("", ""))[1] if pres else ""
+    report = max(non_pres, key=lambda tx: len(tx[1] or ""), default=("", ""))[1] if non_pres else ""
+    if not report and downloaded_texts:
+        report = max(downloaded_texts, key=lambda tx: len(tx[1] or ""))[1]
+    if not deck and downloaded_texts:
+        deck = min(downloaded_texts, key=lambda tx: len(tx[1] or ""))[1]
+    return report, deck
+
+
+def pick_report_and_deck_pdfs(
+    bundle: List[Dict], pdf_map: Dict[str, Path],
+) -> Tuple[Optional[Path], Optional[Path]]:
+    pres_pdfs = []
+    report_pdfs = []
+    for item in bundle:
+        url = item["url"]
+        p = pdf_map.get(url)
+        if p and p.exists():
+            title_low = item["title"].lower()
+            if "presentation" in title_low or "deck" in title_low:
+                pres_pdfs.append(p)
+            else:
+                report_pdfs.append(p)
+    report_pdf = report_pdfs[0] if report_pdfs else (pres_pdfs[0] if pres_pdfs else None)
+    deck_pdf = pres_pdfs[0] if pres_pdfs else None
+    return report_pdf, deck_pdf
+
+
+BOB_DASHBOARD_JSON = Path(__file__).resolve().parent / "docs" / "data" / "bob.json"
+
+
+def _already_sent_today() -> bool:
+    """True when a run has already completed for today's SGT date.
+
+    ``bob.json`` is written only after ``send_email`` returns, so its
+    ``last_run`` is a record that the digest actually went out — which makes
+    it the right thing for the catch-up schedule to check before sending a
+    second one. A missing or unreadable file means "no idea", and the caller
+    should go ahead and run.
+    """
+    try:
+        data = json.loads(BOB_DASHBOARD_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return str(data.get("last_run") or "") == today_sgt_date().isoformat()
+
+
+def _emit_bob_dashboard_json(
+    high_impact: List[dict],
+    material: List[dict],
+    fyi: List[dict],
+    silence: bool,
+) -> None:
+    out_path = BOB_DASHBOARD_JSON
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "last_run": today_sgt_date().isoformat(),
+        "silence": silence,
+        "high_impact": high_impact,
+        "material": material,
+        "fyi": fyi,
+    }
+    out_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    log(f"[bob] Dashboard JSON written → {out_path}")
+
+
+# The digest is meant to land at 09:13 Australia/Sydney every morning. GitHub
+# cron is UTC-only and does not observe daylight saving, so a single fixed cron
+# drifts an hour across the DST boundary (09:13 AEDT becomes 08:13 AEST in
+# winter). Instead daily.yml over-schedules — a fire for each DST candidate
+# plus catch-ups — and this gate stands down any fire whose Australia/Sydney
+# wall-clock time is before the target, so only the 09:13-and-later fire runs.
+# Overridable for tests / a future move: BOB_RUN_TZ, BOB_RUN_HHMM.
+BOB_RUN_TZ = os.environ.get("BOB_RUN_TZ", "Australia/Sydney")
+BOB_RUN_HHMM = os.environ.get("BOB_RUN_HHMM", "09:13")
+
+
+def _bob_run_target_hm() -> Tuple[int, int]:
+    try:
+        h, m = BOB_RUN_HHMM.split(":")
+        return int(h), int(m)
+    except Exception:
+        return 9, 13
+
+
+def _before_scheduled_run_time(now_local: Optional[dt.datetime] = None) -> bool:
+    """True when it is before the daily target time (default 09:13) in
+    BOB_RUN_TZ (default Australia/Sydney).
+
+    This is what makes "09:13 Sydney" track daylight saving on a UTC-only
+    scheduler: daily.yml fires at both DST-candidate UTC times, and the earlier
+    one (08:13 Sydney in winter) stands down here while the 09:13 one runs. On
+    any error (tz database missing, bad config) it returns False — better to
+    send the digest than to silently skip a morning.
+    """
+    if now_local is None:
+        try:
+            from zoneinfo import ZoneInfo
+            now_local = dt.datetime.now(ZoneInfo(BOB_RUN_TZ))
+        except Exception as e:
+            log(f"[schedule] could not resolve {BOB_RUN_TZ} ({e}) — not gating on local time")
+            return False
+    h, m = _bob_run_target_hm()
+    target = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+    return now_local < target
+
+
+def main():
+    # GitHub's `schedule` event is best-effort, not a guarantee: fires are
+    # queued on shared infrastructure, arrive late under load, and are
+    # sometimes dropped outright. On 2026-08-26 the 23:13 fire never
+    # happened and the following day's arrived 5h16m late, so the digest
+    # simply didn't turn up. daily.yml therefore carries several crons (the
+    # two DST candidates for 09:13 Sydney plus a catch-up), and two guards
+    # keep that from sending more than one email a day:
+    #   1. _before_scheduled_run_time stands down a fire that is earlier than
+    #      09:13 Australia/Sydney — the "wrong season's" candidate, so the
+    #      digest lands at 09:13 Sydney in both AEDT and AEST.
+    #   2. _already_sent_today stands down any later fire once one has run.
+    # Only scheduled runs are gated — a manual dispatch always runs, which is
+    # how you force a re-send.
+    run_trigger = os.environ.get("RUN_TRIGGER", "").strip().lower()
+    if run_trigger == "schedule":
+        if _before_scheduled_run_time():
+            log(
+                f"Before {BOB_RUN_HHMM} {BOB_RUN_TZ} — earlier DST-candidate "
+                "fire standing down (the 09:13-Sydney fire will run)."
+            )
+            return
+        if _already_sent_today():
+            log(
+                f"Digest already sent for {today_sgt_date().isoformat()} (SGT) — "
+                "catch-up schedule standing down."
+            )
+            return
+
+    subject = f"{BOB_NAME} {VERSION_LABEL} — Daily Announcements Digest — {today_sgt_date().isoformat()} (SGT)"
+    session = http_session()
+    asx_tickers, _lse_tickers = read_tickers()
+    drive_folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip()
+
+    # FORCE_RERUN_TICKERS lets a manual run re-process a ticker's announcements
+    # even if they're already recorded in seen_state — e.g. to verify a fix
+    # against a known past result-day PDF without clearing the whole state
+    # file. Forced tickers also skip the normal HOURS_BACK fetch window so a
+    # PDF from days/weeks ago can still be picked up.
+    force_rerun_tickers = frozenset(
+        t.strip().upper()
+        for t in os.environ.get("FORCE_RERUN_TICKERS", "").split(",")
+        if t.strip()
+    )
+    if force_rerun_tickers:
+        log(f"FORCE_RERUN_TICKERS active: {sorted(force_rerun_tickers)}")
+
+    # RESULTS_TICKER: analyse a ticker's most recent HY/FY results even if it
+    # last reported weeks or months ago (up to RESULTS_LOOKBACK_DAYS). Unlike
+    # MANUAL_TICKER — 7-day window, every announcement listed as FYI — this
+    # reaches back ~6 months and surfaces ONLY the latest results, running the
+    # normal deep analysis on it. Built for "someone mentioned HPG, what were
+    # their last numbers?". Comma-separated; exclusive when set.
+    results_tickers = frozenset(
+        t.strip().upper()
+        for t in os.environ.get("RESULTS_TICKER", "").split(",")
+        if t.strip()
+    )
+    results_from_date = None
+
+    # MANUAL_TICKER allows one-off analysis of tickers not in the portfolio,
+    # limited to the last 7 days to avoid overwhelming result counts.
+    # When set, ONLY these tickers are analyzed (exclusive mode).
+    # Comma-separated: e.g. "PME,SPZ,XYZ"
+    manual_tickers = frozenset(
+        t.strip().upper()
+        for t in os.environ.get("MANUAL_TICKER", "").split(",")
+        if t.strip()
+    )
+    manual_ticker_from_date = None
+
+    # Mode precedence: RESULTS_TICKER > MANUAL_TICKER > normal portfolio run.
+    # The first two are exclusive one-offs — they replace the portfolio for the
+    # run and are never written to seen_state.
+    if results_tickers:
+        results_from_date = cutoff_dt_sgt(RESULTS_LOOKBACK_DAYS * 24).date()
+        log(
+            f"RESULTS_TICKER: last results for {sorted(results_tickers)} "
+            f"(exclusive mode, {RESULTS_LOOKBACK_DAYS}-day lookback, not saved to state)"
+        )
+        asx_tickers = list(results_tickers)
+    elif manual_tickers:
+        log(f"MANUAL_TICKER: analyzing {sorted(manual_tickers)} (exclusive mode, one-off, not saved to state)")
+        # Restrict to 7 days to avoid 50+ results
+        manual_ticker_from_date = cutoff_dt_sgt(7 * 24).date()
+        # Use ONLY manual tickers, skip the portfolio
+        asx_tickers = list(manual_tickers)
+    else:
+        # Add force_rerun_tickers that aren't already in the portfolio
+        asx_ticker_set = set(asx_tickers)
+        for t in force_rerun_tickers:
+            if t not in asx_ticker_set:
+                asx_tickers = list(asx_tickers) + [t]
+                asx_ticker_set.add(t)
+
+    counters = {
+        "MAX_LLM_CALLS_PER_RUN": MAX_LLM_CALLS_PER_RUN,
+        "llm_calls": 0,
+        "MAX_PDFS_PER_RUN": MAX_PDFS_PER_RUN,
+        "pdfs_downloaded": 0,
+    }
+
+    # Wide-window reruns can pull weeks or months of announcements in one go,
+    # where the implicit "today" a normal daily digest relies on no longer
+    # tells same-ticker events apart (AHC's two acquisitions, six months
+    # apart, both showing up in one FORCE_RERUN_TICKERS run). Show the real
+    # announcement date on every card for these tickers; the normal daily
+    # run (today == the announcement date) never sets this.
+    wide_window_tickers = results_tickers | manual_tickers | force_rerun_tickers
+
+    seen_state = prune_seen_state(load_seen_state(SEEN_STATE_PATH), SEEN_STATE_RETENTION_HOURS)
+    seen_state_updated = dict(seen_state)
+    run_seen_count = 0
+
+    high_impact_blocks: List[str] = []
+    material_blocks: List[str] = []
+    fyi_blocks: List[str] = []
+    brother_blocks: List[str] = []
+
+    # Structured items for docs/data/bob.json dashboard
+    high_impact_items: List[dict] = []
+    material_items: List[dict] = []
+    fyi_items: List[dict] = []
+
+    from_date = cutoff_dt_sgt(HOURS_BACK).date()
+    by_ticker: Dict[str, List[Dict]] = {}
+    for t in asx_tickers:
+        try:
+            # Results tickers reach back ~6 months for the last report. Forced
+            # tickers get the full ASX history window (no from_date filter) so a
+            # past result-day PDF can be found. Manual tickers are limited to 7
+            # days to avoid overwhelming result counts.
+            if t in results_tickers:
+                fetch_from = results_from_date
+            elif t in force_rerun_tickers:
+                fetch_from = None
+            elif t in manual_tickers:
+                fetch_from = manual_ticker_from_date
+            else:
+                fetch_from = from_date
+            by_ticker[t] = fetch_asx_announcements_html(session, t, from_date=fetch_from)
+        except Exception as e:
+            log(f"Fetch failed for {t}: {e}")
+            by_ticker[t] = []
+
+    processed_results: set = set()
+
+    with tempfile.TemporaryDirectory() as tmpdir_str:
+        tmpdir = Path(tmpdir_str)
+
+        for ticker, items in by_ticker.items():
+            if not items:
+                continue
+
+            # Results mode is a one-off "what were their last numbers?" query, so
+            # it ignores seen_state (re-runs must work) and surfaces ONLY the most
+            # recent results — no six months of FYI headlines.
+            is_results_mode = ticker in results_tickers
+            show_date = ticker in wide_window_tickers
+
+            fresh_items: List[Dict] = []
+            for it in items:
+                key = announcement_key(ticker, it["url"])
+                if key in seen_state and ticker not in force_rerun_tickers and not is_results_mode:
+                    continue
+                it["seen_key"] = key
+                fresh_items.append(it)
+
+            if not fresh_items:
+                continue
+
+            if is_results_mode:
+                fresh_items = most_recent_results_cluster(fresh_items)
+                if not fresh_items:
+                    note = (
+                        f"{ticker} — no half-year or full-year results found in the "
+                        f"last {RESULTS_LOOKBACK_DAYS} days. The company may not have "
+                        f"reported in that window."
+                    )
+                    asx_url = f"https://www.asx.com.au/markets/company/{ticker}"
+                    high_impact_blocks.append(f"{note}\nAnnouncements: {asx_url}\n")
+                    high_impact_items.append({
+                        "ticker": ticker, "title": "No recent results",
+                        "url": asx_url, "type": "results",
+                    })
+                    continue
+
+            # FYI: every fresh announcement gets a headline entry.
+            # Suppressed in results mode — the results card is the whole point.
+            for it in ([] if is_results_mode else fresh_items):
+                title = it["title"]
+                url = it["url"]
+                headline = summarise_headline_two_lines(ticker, title)
+                if show_date and it.get("date"):
+                    headline = f"{headline}\nAnnounced: {it['date']}"
+                fyi_entry = f"{headline}\nOpen: {url}\n"
+                fyi_blocks.append(fyi_entry)
+                fyi_items.append({"ticker": ticker, "title": title[:200], "url": url})
+                if ticker == "AR9":
+                    brother_blocks.append(fyi_entry)
+                key = it.get("seen_key")
+                if key:
+                    seen_state_updated[key] = now_sgt().isoformat(timespec="seconds")
+                    run_seen_count += 1
+
+            # Track URLs whose deep analysis is already handled this loop so
+            # the per-item MATERIAL/HIGH IMPACT pass below doesn't re-process
+            # them. Previously the RESULTS bundle branch ended with
+            # ``continue`` — which meant a REMUNERATION (e.g. an amended
+            # employee share plan filed the same morning as the annual
+            # report) was never reached and quietly fell into FYI. That is
+            # exactly the AHC failure mode.
+            handled_urls: set = set()
+
+            # RESULTS bundle
+            if any(looks_like_results_title(i["title"]) for i in fresh_items) and ticker not in processed_results:
+                processed_results.add(ticker)
+                bundle = likely_results_bundle_items(fresh_items)
+                downloaded_texts: List[Tuple[str, str]] = []
+                pdf_map: Dict[str, Path] = {}
+                any_results_link = bundle[0]["url"] if bundle else fresh_items[0]["url"]
+                any_results_date = (
+                    (bundle[0] if bundle else fresh_items[0]).get("date", "") if show_date else ""
+                )
+
+                # Raw PDFs are no longer copied to Drive — the ASX link in the
+                # email points at the same PDF and the Google Doc is the
+                # actual archive. See CLAUDE.md for the rationale.
+                for b in bundle:
+                    title = b["title"]
+                    url = b["url"]
+                    handled_urls.add(url)
+                    pdf_url = asx_pdf_url_from_item_url(url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{title[:80]}")
+                    pdf_path = tmpdir / f"{safe_name}.pdf"
+                    text, got_pdf = fetch_announcement_text(session, url, pdf_url, pdf_path, counters)
+                    downloaded_texts.append((title, text))
+                    if got_pdf:
+                        pdf_map[url] = pdf_path
+
+                report_text, deck_text = pick_report_and_deck_text(downloaded_texts)
+                report_pdf, deck_pdf = pick_report_and_deck_pdfs(bundle, pdf_map)
+                report_text = (report_text or "")[:120_000]
+                deck_text = (deck_text or "")[:120_000]
+
+                has_pdf = (report_pdf and report_pdf.exists()) or (deck_pdf and deck_pdf.exists())
+                has_text = (
+                    is_meaningful_text(report_text, min_chars=MIN_RESULTS_TEXT_CHARS)
+                    or is_meaningful_text(deck_text, min_chars=MIN_RESULTS_TEXT_CHARS)
+                )
+
+                if not has_pdf and not has_text:
+                    block = (
+                        f"{ticker} — Results detected, but Bob couldn't extract meaningful content.\n"
+                        + (f"Announced: {any_results_date}\n" if any_results_date else "")
+                        + f"Open manually: {any_results_link}\n"
+                    )
+                    high_impact_blocks.append(block)
+                    high_impact_items.append({
+                        "ticker": ticker, "title": "Results (HY/FY)", "url": any_results_link, "type": "results",
+                    })
+                    if ticker == "AR9":
+                        brother_blocks.append(block)
+                    # Fall through to the per-item loop so a REMUNERATION
+                    # or other item filed the same day still gets analysed.
+                else:
+                    analysis = deep_results_analysis(
+                        ticker, report_text, deck_text, counters,
+                        report_pdf=report_pdf, deck_pdf=deck_pdf,
+                    )
+
+                    # The long-form analysis leaves the email and goes to a
+                    # standalone PDF attached to the email. PDF generation is
+                    # non-fatal — if weasyprint isn't available, the email
+                    # still ships without it.
+                    analysis_pdf_path = None
+                    try:
+                        analysis_pdf_path = generate_analysis_pdf(
+                            ticker,
+                            _results_period_label(analysis),
+                            build_analysis_doc_html(ticker, analysis, any_results_link),
+                        )
+                    except Exception as e:
+                        log(f"ERROR: analysis PDF generation failed for {ticker}: {type(e).__name__}: {e}")
+
+                    block = build_results_block(
+                        ticker=ticker,
+                        analysis=analysis,
+                        asx_url=any_results_link,
+                        doc_link="",
+                        doc_error="",
+                        announced=any_results_date,
+                    )
+                    high_impact_blocks.append(block)
+                    high_impact_items.append({
+                        "ticker": ticker, "title": bundle[0]["title"] if bundle else "Results (HY/FY)",
+                        "url": any_results_link, "type": "results", "analysis": analysis,
+                        "doc_link": "", "doc_error": "", "pdf_path": str(analysis_pdf_path) if analysis_pdf_path else None,
+                    })
+                    if ticker == "AR9":
+                        brother_blocks.append(block)
+
+            # Per-item MATERIAL / HIGH IMPACT
+            for it in fresh_items:
+                title = it["title"]
+                url = it["url"]
+                if url in handled_urls:
+                    # Already processed as part of the results bundle above;
+                    # don't double-analyse the same PDF.
+                    continue
+                asx_flagged = it.get("price_sensitive", False)
+                is_price = is_price_sensitive_title(title) or asx_flagged
+                cls_title = classify_from_title_only(title)
+                item_date = it.get("date", "") if show_date else ""
+
+                # Remuneration / share plan amendments are analysed whether or
+                # not ASX flags them price-sensitive — the whole point of this
+                # branch is that a quietly filed plan-rules change never shows
+                # up flagged, and reading it by hand is exactly the job Bob
+                # is meant to do here.
+                if cls_title == "REMUNERATION":
+                    pdf_url = asx_pdf_url_from_item_url(url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{title[:80]}")
+                    pdf_path = tmpdir / f"{safe_name}.pdf"
+                    text, got_pdf = fetch_announcement_text(session, url, pdf_url, pdf_path, counters)
+
+                    if looks_like_asx_access_gate(text) and not got_pdf:
+                        block = f"{ticker}: {title[:160]}\nSo what: could not fetch remuneration PDF automatically. Open: {url}\n"
+                        material_blocks.append(block)
+                        material_items.append({"ticker": ticker, "title": title[:200], "url": url})
+                        if ticker == "AR9":
+                            brother_blocks.append(block)
+                        if pdf_path.exists():
+                            try:
+                                pdf_path.unlink()
+                            except Exception:
+                                pass
+                        continue
+
+                    current_pdf = pdf_path if got_pdf else None
+                    analysis = deep_remuneration_memo(
+                        ticker, title, text, counters, pdf_path=current_pdf,
+                    )
+
+                    analysis_pdf_path = None
+                    try:
+                        analysis_pdf_path = generate_analysis_pdf(
+                            ticker,
+                            "remuneration",
+                            build_remuneration_doc_html(ticker, analysis, url),
+                        )
+                    except Exception as e:
+                        log(f"ERROR: remuneration PDF generation failed for {ticker}: {type(e).__name__}: {e}")
+
+                    if pdf_path.exists():
+                        try:
+                            pdf_path.unlink()
+                        except Exception:
+                            pass
+
+                    block = build_remuneration_block(ticker, analysis, url, announced=item_date)
+                    high_impact_blocks.append(block)
+                    high_impact_items.append({
+                        "ticker": ticker, "title": title[:200], "url": url,
+                        "type": "remuneration", "analysis": analysis,
+                        "pdf_path": str(analysis_pdf_path) if analysis_pdf_path else None,
+                    })
+                    if ticker == "AR9":
+                        brother_blocks.append(block)
+                    continue
+
+                if not is_price:
+                    continue
+
+                # Capital raise / debt raise: its own structured card + PDF,
+                # like results and remuneration. Replaces the old shared text-
+                # blob path — a fundraising announcement now renders as a
+                # verdict-pilled quick-take card (opportunistic/rescue) with the
+                # forensic detail in the attached PDF.
+                if cls_title == "CAPITAL_OR_DEBT_RAISE":
+                    pdf_url = asx_pdf_url_from_item_url(url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{title[:80]}")
+                    pdf_path = tmpdir / f"{safe_name}.pdf"
+                    text, got_pdf = fetch_announcement_text(session, url, pdf_url, pdf_path, counters)
+
+                    if looks_like_asx_access_gate(text) and not got_pdf:
+                        block = f"{ticker}: {title[:160]}\nSo what: could not fetch raise PDF automatically. Open: {url}\n"
+                        material_blocks.append(block)
+                        material_items.append({"ticker": ticker, "title": title[:200], "url": url})
+                        if ticker == "AR9":
+                            brother_blocks.append(block)
+                        if pdf_path.exists():
+                            try:
+                                pdf_path.unlink()
+                            except Exception:
+                                pass
+                        continue
+
+                    current_pdf = pdf_path if got_pdf else None
+                    # EODHD prior balance sheet (best-effort) — grounds the
+                    # before->after and fills the leverage baseline the
+                    # announcement rarely restates.
+                    debt_profile = fetch_debt_profile(ticker)
+                    analysis = deep_capital_memo(
+                        ticker, title, text, counters,
+                        pdf_path=current_pdf, debt_profile=debt_profile,
+                    )
+                    if debt_profile:
+                        analysis["debt_profile"] = debt_profile
+
+                    analysis_pdf_path = None
+                    try:
+                        analysis_pdf_path = generate_analysis_pdf(
+                            ticker,
+                            "capital",
+                            build_fundraise_doc_html(ticker, analysis, url),
+                        )
+                    except Exception as e:
+                        log(f"ERROR: fundraise PDF generation failed for {ticker}: {type(e).__name__}: {e}")
+
+                    if pdf_path.exists():
+                        try:
+                            pdf_path.unlink()
+                        except Exception:
+                            pass
+
+                    block = build_fundraise_block(ticker, analysis, url, announced=item_date)
+                    high_impact_blocks.append(block)
+                    high_impact_items.append({
+                        "ticker": ticker, "title": title[:200], "url": url,
+                        "type": "capital", "analysis": analysis,
+                        "pdf_path": str(analysis_pdf_path) if analysis_pdf_path else None,
+                    })
+                    if ticker == "AR9":
+                        brother_blocks.append(block)
+                    continue
+
+                # Appendix 4C / 5B quarterly cash flow report: its own
+                # cash-flow-and-runway card + PDF, like results, remuneration
+                # and capital raises. A pure "the 4C will be released on
+                # <date>" notice (has_data=False) produces nothing beyond the
+                # FYI line every announcement already gets — see
+                # deep_4c_memo.
+                if cls_title == "QUARTERLY_4C":
+                    pdf_url = asx_pdf_url_from_item_url(url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{title[:80]}")
+                    pdf_path = tmpdir / f"{safe_name}.pdf"
+                    text, got_pdf = fetch_announcement_text(session, url, pdf_url, pdf_path, counters)
+
+                    if looks_like_asx_access_gate(text) and not got_pdf:
+                        block = f"{ticker}: {title[:160]}\nSo what: could not fetch 4C PDF automatically. Open: {url}\n"
+                        material_blocks.append(block)
+                        material_items.append({"ticker": ticker, "title": title[:200], "url": url})
+                        if ticker == "AR9":
+                            brother_blocks.append(block)
+                        if pdf_path.exists():
+                            try:
+                                pdf_path.unlink()
+                            except Exception:
+                                pass
+                        continue
+
+                    current_pdf = pdf_path if got_pdf else None
+                    analysis = deep_4c_memo(ticker, title, text, counters, pdf_path=current_pdf)
+
+                    if pdf_path.exists():
+                        try:
+                            pdf_path.unlink()
+                        except Exception:
+                            pass
+
+                    if not analysis.get("has_data", True):
+                        notice_date = str(analysis.get("notice_date") or "").strip()
+                        log(
+                            f"[4C] {ticker}: notification-only, no cash flow data to analyse"
+                            + (f" (report expected {notice_date})" if notice_date else "")
+                        )
+                        continue
+
+                    analysis_pdf_path = None
+                    try:
+                        analysis_pdf_path = generate_analysis_pdf(
+                            ticker, "4c", build_4c_doc_html(ticker, analysis, url),
+                        )
+                    except Exception as e:
+                        log(f"ERROR: 4C PDF generation failed for {ticker}: {type(e).__name__}: {e}")
+
+                    block = build_4c_block(ticker, analysis, url, announced=item_date)
+                    high_impact_blocks.append(block)
+                    high_impact_items.append({
+                        "ticker": ticker, "title": title[:200], "url": url,
+                        "type": "quarterly_4c", "analysis": analysis,
+                        "pdf_path": str(analysis_pdf_path) if analysis_pdf_path else None,
+                    })
+                    if ticker == "AR9":
+                        brother_blocks.append(block)
+                    continue
+
+                # Trading update / guidance: its own quick-take card + PDF,
+                # same treatment as capital raises. A pure "the trading update
+                # will be released on <date>" notice (has_data=False)
+                # produces nothing beyond the FYI line — this is the MSV
+                # failure mode (a nice table with every row reading "n/a").
+                if cls_title == "TRADING_UPDATE":
+                    pdf_url = asx_pdf_url_from_item_url(url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{title[:80]}")
+                    pdf_path = tmpdir / f"{safe_name}.pdf"
+                    text, got_pdf = fetch_announcement_text(session, url, pdf_url, pdf_path, counters)
+
+                    if looks_like_asx_access_gate(text) and not got_pdf:
+                        block = f"{ticker}: {title[:160]}\nSo what: could not fetch trading update PDF automatically. Open: {url}\n"
+                        material_blocks.append(block)
+                        material_items.append({"ticker": ticker, "title": title[:200], "url": url})
+                        if ticker == "AR9":
+                            brother_blocks.append(block)
+                        if pdf_path.exists():
+                            try:
+                                pdf_path.unlink()
+                            except Exception:
+                                pass
+                        continue
+
+                    current_pdf = pdf_path if got_pdf else None
+                    analysis = deep_trading_update_memo(ticker, title, text, counters, pdf_path=current_pdf)
+
+                    if pdf_path.exists():
+                        try:
+                            pdf_path.unlink()
+                        except Exception:
+                            pass
+
+                    if not analysis.get("has_data", True):
+                        notice_date = str(analysis.get("notice_date") or "").strip()
+                        log(
+                            f"[trading_update] {ticker}: notification-only, no trading data to analyse"
+                            + (f" (update expected {notice_date})" if notice_date else "")
+                        )
+                        continue
+
+                    analysis_pdf_path = None
+                    try:
+                        analysis_pdf_path = generate_analysis_pdf(
+                            ticker, "trading_update", build_trading_update_doc_html(ticker, analysis, url),
+                        )
+                    except Exception as e:
+                        log(f"ERROR: trading update PDF generation failed for {ticker}: {type(e).__name__}: {e}")
+
+                    block = build_trading_update_block(ticker, analysis, url, announced=item_date)
+                    high_impact_blocks.append(block)
+                    high_impact_items.append({
+                        "ticker": ticker, "title": title[:200], "url": url,
+                        "type": "trading_update", "analysis": analysis,
+                        "pdf_path": str(analysis_pdf_path) if analysis_pdf_path else None,
+                    })
+                    if ticker == "AR9":
+                        brother_blocks.append(block)
+                    continue
+
+                if cls_title == "ACQUISITION":
+                    pdf_url = asx_pdf_url_from_item_url(url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{title[:80]}")
+                    pdf_path = tmpdir / f"{safe_name}.pdf"
+                    text, got_pdf = fetch_announcement_text(session, url, pdf_url, pdf_path, counters)
+
+                    if looks_like_asx_access_gate(text):
+                        block = f"{ticker}: {title[:160]}\nSo what: could not fetch PDF automatically. Open: {url}\n"
+                        material_blocks.append(block)
+                        material_items.append({"ticker": ticker, "title": title[:200], "url": url})
+                        if ticker == "AR9":
+                            brother_blocks.append(block)
+                        if pdf_path.exists():
+                            try:
+                                pdf_path.unlink()
+                            except Exception:
+                                pass
+                        continue
+
+                    current_pdf = pdf_path if got_pdf else None
+                    analysis = deep_acquisition_memo(ticker, title, text, counters, pdf_path=current_pdf)
+
+                    analysis_pdf_path = None
+                    try:
+                        analysis_pdf_path = generate_analysis_pdf(
+                            ticker, "acquisition", build_acquisition_doc_html(ticker, analysis, url),
+                        )
+                    except Exception as e:
+                        log(f"ERROR: acquisition PDF generation failed for {ticker}: {type(e).__name__}: {e}")
+
+                    if pdf_path.exists():
+                        try:
+                            pdf_path.unlink()
+                        except Exception:
+                            pass
+
+                    block = build_acquisition_block(ticker, analysis, url, announced=item_date)
+                    high_impact_blocks.append(block)
+                    high_impact_items.append({
+                        "ticker": ticker, "title": title[:200], "url": url,
+                        "type": "acquisition", "analysis": analysis,
+                        "pdf_path": str(analysis_pdf_path) if analysis_pdf_path else None,
+                    })
+                    if ticker == "AR9":
+                        brother_blocks.append(block)
+                    continue
+
+                # ASX-flagged price sensitive items that aren't already handled by a
+                # specific deep-analysis category get the full HIGH IMPACT treatment.
+                if asx_flagged and cls_title not in (
+                    "ACQUISITION", "CAPITAL_OR_DEBT_RAISE", "TRADING_UPDATE", "QUARTERLY_4C",
+                ):
+                    pdf_url = asx_pdf_url_from_item_url(url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{title[:80]}")
+                    pdf_path = tmpdir / f"{safe_name}.pdf"
+                    text, got_pdf = fetch_announcement_text(session, url, pdf_url, pdf_path, counters)
+
+                    if looks_like_asx_access_gate(text):
+                        block = f"{ticker}: {title[:160]}\nSo what: could not fetch PDF automatically. Open: {url}\n"
+                        material_blocks.append(block)
+                        material_items.append({"ticker": ticker, "title": title[:200], "url": url})
+                        if ticker == "AR9":
+                            brother_blocks.append(block)
+                        if pdf_path.exists():
+                            try:
+                                pdf_path.unlink()
+                            except Exception:
+                                pass
+                        continue
+
+                    current_pdf = pdf_path if got_pdf else None
+                    memo = deep_price_sensitive_memo(ticker, title, text, counters, pdf_path=current_pdf)
+                    block = build_high_impact_block(
+                        ticker=ticker,
+                        heading="ASX Price Sensitive",
+                        memo=memo,
+                        url=url,
+                        analysed_via_pdf=got_pdf,
+                        kind="price_sensitive",
+                        failed=_is_llm_failure(memo),
+                        announced=item_date,
+                    )
+                    if pdf_path.exists():
+                        try:
+                            pdf_path.unlink()
+                        except Exception:
+                            pass
+                    high_impact_blocks.append(block)
+                    high_impact_items.append({
+                        "ticker": ticker, "title": title[:200], "url": url,
+                        "type": "price_sensitive", "analysis": memo,
+                    })
+                    if ticker == "AR9":
+                        brother_blocks.append(block)
+                    continue
+
+                text = ""
+                if cls_title == "CONTRACT_MATERIAL":
+                    pdf_url = asx_pdf_url_from_item_url(url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{title[:80]}")
+                    pdf_path = tmpdir / f"{safe_name}.pdf"
+                    text, got_pdf = fetch_announcement_text(session, url, pdf_url, pdf_path, counters)
+                    if pdf_path.exists():
+                        try:
+                            pdf_path.unlink()
+                        except Exception:
+                            pass
+
+                analysis_2l: Optional[dict] = None
+                if text and is_meaningful_text(text, min_chars=600):
+                    analysis_2l = summarise_two_lines_llm(ticker, title, text, counters)
+                if analysis_2l:
+                    summary_text = _analysis_to_email_text(analysis_2l, "default")
+                else:
+                    summary_text = f"{ticker}: {title[:160]}\nSo what: price-sensitive headline — open link for details."
+                    analysis_2l = {
+                        "what_happened": f"{ticker}: {title[:160]}",
+                        "so_what": "Price-sensitive headline — open link for details.",
+                    }
+                block = f"{summary_text}\n" + (f"Announced: {item_date}\n" if item_date else "") + f"Open: {url}\n"
+                material_blocks.append(block)
+                material_items.append({
+                    "ticker": ticker, "title": title[:200], "url": url, "analysis": analysis_2l,
+                })
+                if ticker == "AR9":
+                    brother_blocks.append(block)
+
+    body_text, body_html = build_email(high_impact_blocks, material_blocks, fyi_blocks)
+
+    # Collect PDF attachments from results items
+    attachments = []
+    for item in high_impact_items:
+        pdf_path_str = item.get("pdf_path")
+        if pdf_path_str:
+            pdf_path = Path(pdf_path_str)
+            if pdf_path.exists():
+                attachments.append(pdf_path)
+
+    send_email(subject, body_text, body_html, attachments=attachments if attachments else None)
+
+    brother_email = os.environ.get("BROTHER_EMAIL", "").strip()
+    if brother_email and brother_blocks:
+        bro_subject = f"{BOB_NAME} {VERSION_LABEL} — AR9 Digest — {today_sgt_date().isoformat()} (SGT)"
+        bro_text = "\n".join([bro_subject, "", *(_block_text(b) for b in brother_blocks)])
+        bro_html = "<div style='padding:18px; background:%s; color:%s; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif;'>" % (COLOR_BG, COLOR_TEXT)
+        bro_html += f"<div style='font-size:20px; font-weight:900; margin-bottom:8px;'>{htmlmod.escape(bro_subject)}</div>"
+        bro_html += _html_section("AR9 ONLY", COLOR_MATERIAL, brother_blocks)
+        bro_html += "</div>"
+        send_email(bro_subject, bro_text, bro_html, to_addr=brother_email)
+
+    # Exclusive one-off modes (RESULTS_TICKER / MANUAL_TICKER) email their
+    # analysis but must not touch shared state: writing bob.json would clobber
+    # the portfolio dashboard with a single ad-hoc ticker, and — because that
+    # write stamps last_run = today — would make the evening scheduled digest's
+    # catch-up guard think the digest had already gone out and stand it down.
+    # An ad-hoc "what were HPG's last numbers?" from a phone must never cost the
+    # user that night's portfolio digest.
+    one_off_mode = bool(results_tickers or manual_tickers)
+    if one_off_mode:
+        log("One-off mode: skipping bob.json / seen-state writes (dashboard and scheduled digest untouched).")
+    else:
+        _emit_bob_dashboard_json(
+            high_impact=high_impact_items,
+            material=material_items,
+            fyi=fyi_items,
+            silence=not (high_impact_blocks or material_blocks or fyi_blocks),
+        )
+        save_seen_state(SEEN_STATE_PATH, prune_seen_state(seen_state_updated, SEEN_STATE_RETENTION_HOURS))
+        log(f"Seen-state updated with {run_seen_count} new announcement(s).")
+    log("Email sent.")
+
+
+if __name__ == "__main__":
+    main()

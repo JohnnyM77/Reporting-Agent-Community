@@ -1,0 +1,148 @@
+name: YouTube -- Ned Transcript Fetcher
+
+# Manual, on-demand single-episode YouTube transcript fetcher.
+# Paste a YouTube link into the "Run workflow" box and Ned will fetch the
+# transcript, save it, summarise it with the same LLM step it uses elsewhere,
+# and email the digest. The raw transcripts are uploaded as an artifact.
+#
+# Runs on the SELF-HOSTED Windows runner (mr_co-runer) on purpose: YouTube
+# blocks caption requests from cloud/datacentre IPs (GitHub-hosted runners get
+# a RequestBlocked/IpBlocked error), whereas the self-hosted runner uses a
+# residential IP that YouTube serves normally. The runner's PC must be on and
+# the runner process running for a dispatch to start (it queues otherwise).
+#
+# This is separate from the scheduled "Ned News Agent" scan on purpose: it
+# takes an input, runs a different code path, and must not touch the daily
+# digest or the Pages deploy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      youtube_url:
+        description: "YouTube episode link (watch?v=..., youtu.be/..., or /shorts/...)"
+        required: true
+        type: string
+      general_interest:
+        description: "Non-finance mode (health, wellness, etc.)? Skip portfolio context & dashboard publish."
+        required: false
+        type: boolean
+        default: false
+      analysis_hints:
+        description: "Optional: Custom instructions or questions for Claude (e.g., 'Answer: What are the key takeaways?' or 'Focus on cost structures.')"
+        required: false
+        type: string
+
+jobs:
+  transcript:
+    runs-on: [self-hosted, Windows]
+    # Needed so the commit step at the end can push docs/data/transcripts.json
+    # + the rebuilt docs/index.html back to the branch.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        # Windows PowerShell 5.1 (invoked as `powershell`) ships with every
+        # supported Windows version. `pwsh` refers to PowerShell 7+, which
+        # this runner doesn't have installed; `bash` needs Git Bash on PATH,
+        # which the runner process can't find. `powershell` is the only
+        # shell we can rely on being available.
+        shell: powershell
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          # Use the machine's own Python (3.14) rather than setup-python, which
+          # would try to populate a tool cache this runner doesn't have.
+          $py = "C:\Users\mr_co\AppData\Local\Programs\Python\Python314\python.exe"
+          if (-not (Test-Path $py)) {
+            # Fall back to whatever "python" resolves to on PATH.
+            $py = "python"
+          }
+          Write-Host "Using Python: $py"
+          & $py --version
+          & $py -m pip install --upgrade pip
+          & $py -m pip install -r requirements-ned.txt
+          # playwright powers the transcript PDF via installed Chrome, same
+          # pattern Slinger uses on this runner. `channel='chrome'` reuses
+          # the Chrome install SGX already relies on, so no browser download
+          # is needed here.
+          & $py -m pip install playwright
+
+      - name: Fetch transcript + digest
+        env:
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Passed via env (not the run: line) so an odd URL can't be shell-injected.
+          NED_TRANSCRIPT_URL: ${{ inputs.youtube_url }}
+          # Non-finance mode: skip portfolio context and dashboard updates.
+          NED_GENERAL_INTEREST: ${{ inputs.general_interest }}
+          # Custom analysis instructions passed to Claude.
+          NED_ANALYSIS_HINTS: ${{ inputs.analysis_hints }}
+          # Optional repo variables (Settings > Secrets and variables >
+          # Actions > Variables). Unset = the defaults in ned/main.py.
+          NED_TRANSCRIPT_MODEL: ${{ vars.NED_TRANSCRIPT_MODEL }}
+          NED_TRANSCRIPT_MAX_TOKENS: ${{ vars.NED_TRANSCRIPT_MAX_TOKENS }}
+          NED_TRANSCRIPT_LLM_MAX_CHARS: ${{ vars.NED_TRANSCRIPT_LLM_MAX_CHARS }}
+        run: |
+          $py = "C:\Users\mr_co\AppData\Local\Programs\Python\Python314\python.exe"
+          if (-not (Test-Path $py)) { $py = "python" }
+          & $py -m ned.main
+
+      - name: Upload transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ned-transcripts
+          path: transcripts/
+          if-no-files-found: ignore
+
+      - name: Commit dashboard update
+        # Same pattern the other agents use (Bob, Ned scan, Wally): commit
+        # the data JSON, pull --rebase to absorb anything that landed while
+        # we ran, rebuild the dashboard from the fresh data, and push. Runs
+        # even on a fetch failure so a "failed to fetch" partial can still
+        # be surfaced if that lands on the dashboard in future.
+        #
+        # Skip dashboard updates in non-finance mode (general_interest=true):
+        # non-finance transcripts are not published to the site.
+        if: always()
+        run: |
+          $py = "C:\Users\mr_co\AppData\Local\Programs\Python\Python314\python.exe"
+          if (-not (Test-Path $py)) { $py = "python" }
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          $isGeneralInterest = "${{ inputs.general_interest }}" -eq "true"
+
+          if ($isGeneralInterest) {
+            Write-Host "Non-finance mode: skipping dashboard updates"
+          } elseif (Test-Path "docs\data\transcripts.json") {
+            git add docs/data/transcripts.json
+            # `git add -A` on docs/transcripts/ picks up the new PDF plus
+            # any deletions from _prune_old_transcript_pdfs (Path.unlink
+            # writes to the working tree; -A stages the removals so the
+            # commit reflects the pruned state). Guarded because the
+            # folder may not exist on a fresh checkout -- the first run
+            # creates it.
+            if (Test-Path "docs\transcripts") {
+              git add -A docs/transcripts
+            }
+            git diff --staged --quiet
+            if ($LASTEXITCODE -ne 0) {
+              git commit -m "Ned transcripts data [skip ci]"
+            }
+            git pull --rebase origin HEAD
+            & $py scripts/build_dashboard.py
+            git add docs/index.html
+            git diff --staged --quiet
+            if ($LASTEXITCODE -ne 0) {
+              git commit -m "Dashboard update -- Ned transcripts [skip ci]"
+            }
+            git push origin HEAD
+          } else {
+            Write-Host "No transcripts.json produced this run; nothing to commit."
+          }

@@ -1,0 +1,89 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Master Investor Alert — generated digests and runtime outputs
+outputs/
+
+# Ned -- single-episode raw transcripts at the repo root (fetched on demand;
+# uploaded as CI artifacts). Leading slash so this doesn't also match
+# docs/transcripts/, which holds the published dashboard PDFs and *does*
+# need to be committed. A live podcast run against
+# `psychology-of-the-stock-market` (2026-09-25) failed the commit step
+# with "The following paths are ignored by one of your .gitignore files:
+# docs/transcripts" because the old bare `transcripts/` matched both.
+/transcripts/
+
+# SWS Drip Bot
+data/sws.db
+data/sws_debug/*
+!data/sws_debug/.gitkeep
+storage_state.json
+
+# Theo — generated slides and published site
+slides/
+site/
+
+# Theo — the private transaction ledger. Never commit these: they carry every
+# cost, dividend and current value. Run scripts/export_ledger.py to produce
+# data/decisions.json, which is money-free and is the file Theo reads in CI.
+data/portfolio.xlsx
+data/*IRR*.xlsx
+data/Jzx_Portfolio*.xlsx
+
+# Captain Hindsight — private store (case files, SQLite, reports, bias profile).
+# Never commit: see docs/CAPTAIN_HINDSIGHT_ARCHITECTURE.md
+hindsight_data/
+hindsight_private/
+# Esther the Wrestler: previous runs (JM's views and holdings). Never commit.
+esther_data/
+esther_private/
+
+# Micky's Macro: raw research email content and extracted claims. Never commit.
+# See docs/MICKYS_MACRO_ARCHITECTURE.md
+mickys_macro_data/
+
+# Community edition build output (scripts/build_community.py)
+_community/

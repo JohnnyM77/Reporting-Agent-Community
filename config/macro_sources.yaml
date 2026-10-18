@@ -1,0 +1,99 @@
+# Micky's Macro -- configurable source registry. Code never hard-codes a
+# sender, domain or keyword; everything here is read by marks_macro/config.py.
+#
+# Sender addresses under `priority_sources` are real addresses seen in
+# Johnny's own Gmail, discovered via search (name/domain/newsletter), not
+# invented -- see docs/MARKS_MACRO_ARCHITECTURE.md section 1.5 for how each
+# one was confirmed and when. Add more as they turn up (a source moves
+# platforms, like Chamath did from Substack to Beehiiv); never guess one.
+
+priority_sources:
+  - name: Citrini Research
+    rules:
+      - match: exact_sender
+        value: citrini@substack.com
+
+  - name: Ray Dalio / Economic Principles
+    rules:
+      - match: exact_sender
+        value: raydalio@substack.com
+      - match: exact_sender
+        value: no-reply@principles.com
+
+  - name: Scott Galloway (Prof G)
+    rules:
+      # profgmedia+<sub-newsletter>@substack.com -- Prof G Media runs several
+      # sub-newsletters (Prof G, No Mercy No Malice, Prof G Markets, Extra
+      # Credit) off the same Substack plus-addressed sender; prefix match
+      # catches all of them without hard-coding each one.
+      - match: sender_local_prefix
+        value: profgmedia
+        domain: substack.com
+
+  - name: Chamath Palihapitiya
+    rules:
+      - match: exact_sender
+        value: chamath@substack.com
+      - match: exact_sender
+        value: chamath@mail.beehiiv.com
+
+# Generic cross-promotion mail ("X, Y and Z posted new notes") that matches
+# a priority sender's name in the subject but carries no actual research.
+# Excluded by rule, not by sender, since no-reply@substack.com is shared by
+# every Substack author's notifications.
+exclude_subject_patterns:
+  - '(?i)posted new notes?$'
+  - '(?i)^recommendations from your substacks?$'
+
+# Research houses: public reports only, no paywall bypass, no scraping
+# credentials configured in this pass (see architecture doc section 4,
+# item 3). Listed so scoring/sourcing code has a controlled vocabulary of
+# institution names and a place to add a fetch rule per source later.
+research_houses:
+  - name: Bridgewater Associates
+    kind: original_research
+  - name: PIMCO
+    kind: original_research
+  - name: BlackRock Investment Institute
+    kind: original_research
+  - name: J.P. Morgan Asset Management
+    kind: original_research
+  - name: Goldman Sachs Research
+    kind: original_research
+  - name: Morgan Stanley Research
+    kind: original_research
+  - name: UBS CIO
+    kind: original_research
+  - name: Bank of America Global Research
+    kind: original_research
+  - name: Citi Research
+    kind: original_research
+  - name: Fidelity
+    kind: original_research
+  - name: Capital Group
+    kind: original_research
+  - name: Schroders
+    kind: original_research
+
+# Macro / thematic keywords used to tag a claim with a taxonomy category
+# when the model's own category pick needs a deterministic cross-check.
+# Matched case-insensitively against claim text and headline.
+theme_keywords:
+  AI_AUTOMATION_ROBOTICS: [artificial intelligence, " ai ", automation, robotics, productivity]
+  SEMICONDUCTORS_COMPUTE: [semiconductor, compute, gpu, data cent, chip, foundry, lithography]
+  ELECTRICITY_GRID: [electricity demand, power generation, grid, transformer, transmission, substation]
+  ELECTRIFICATION_METALS: [electrification, copper, industrial metal, ev adoption]
+  CRITICAL_MINERALS: [critical mineral, rare earth, strategic resource]
+  ENERGY_SECURITY: [energy security, lng, oil supply, gas supply, nuclear power, uranium]
+  RENEWABLES_STORAGE: [renewable, battery, energy storage, solar, wind power]
+  FOOD_SECURITY_AG: [food security, agricultural productivity, potash, fertiliser, fertilizer, crop yield]
+  WATER: [water scarcity, water treatment, water infrastructure]
+  DEMOGRAPHICS_HEALTHCARE: [ageing population, aging population, demographic, healthcare demand]
+  POPULATION_URBANISATION: [population growth, urbanisation, urbanization, housing demand]
+  DEFENCE_GEOPOLITICS: [defence spending, defense spending, rearmament, geopolitical fragmentation]
+  SUPPLY_CHAIN_RESHORING: [reshoring, supply chain resilience, industrial policy, friend-shoring]
+  DEBT_MONETARY_REGIME: [global debt, monetary regime, fiscal sustainability, debt cycle, inflation regime]
+  TRADE_TARIFFS_CURRENCY: [tariff, trade war, currency regime, capital flow]
+  CYBERSECURITY: [cybersecurity, digital sovereignty]
+  TRANSPORT_LOGISTICS: [logistics, transport infrastructure, shipping capacity]
+  FINANCIAL_MARKET_STRUCTURE: [market structure, financial market infrastructure]

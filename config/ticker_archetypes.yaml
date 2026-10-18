@@ -1,0 +1,3206 @@
+# One entry per ticker across watchlists/*.yaml (plus portfolio holdings).
+# Maintained by shared/archetype_sync.py. Edit by hand to confirm or override:
+#   status: confirmed   -> the sync and the classifier never change this entry
+#   override_multiple + override_reason -> always wins over the rules
+#   structural_headwind: true -> subtracts 2x (regulation, fee cuts)
+# Rules: config/valuation_archetypes.yaml. Explained: docs/VALUATION_RULES.md
+tickers:
+  2914.T:
+    archetype: unclassified
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-18'
+    company: ''
+    suggested_multiple: null
+    confidence: 0.0
+    emailed: true
+  360.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: LIFE360 Inc
+    suggested_multiple: 13.0
+    confidence: 0.6
+    emailed: true
+  AAI:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: AIRTRAN HOLDINGS INC
+    suggested_multiple: 18.0
+    confidence: 0.55
+    emailed: true
+  AAON:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: AAON Inc
+    suggested_multiple: 18.0
+    confidence: 0.65
+    emailed: true
+  AAPL:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Apple Inc.
+    suggested_multiple: 29.0
+    confidence: 0.65
+    emailed: true
+  ABB.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Aussie Broadband Ltd
+    suggested_multiple: 11.0
+    confidence: 0.8
+    emailed: true
+  ABV.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Advanced Braking Technology Ltd
+    suggested_multiple: 18.0
+    confidence: 0.65
+    emailed: true
+  AD8.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Audinate Group Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  ADBE:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Adobe Systems Incorporated
+    suggested_multiple: 29.0
+    confidence: 0.8
+    emailed: true
+  ADH.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Adairs Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  AEF.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Australian Ethical Investment Ltd
+    suggested_multiple: 12.0
+    confidence: 0.6
+    emailed: true
+  AFL.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Af Legal Group Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  AHC.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Austco Healthcare Ltd
+    suggested_multiple: 15.4
+    confidence: 0.65
+    emailed: true
+  AI1.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Adisyn Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  AIA.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Auckland International Airport Ltd
+    suggested_multiple: 11.0
+    confidence: 0.7
+    emailed: true
+  AIH.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Advanced Innergy Holdings Ltd
+    suggested_multiple: 18.0
+    confidence: 0.45
+    emailed: true
+  AIM.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Ai-Media Technologies Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  AJG:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Arthur J Gallagher & Co
+    suggested_multiple: 14.0
+    confidence: 0.9
+    emailed: true
+  AMD:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Advanced Micro Devices Inc
+    suggested_multiple: 13.0
+    confidence: 0.7
+    emailed: true
+  AMZN:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Amazon.com Inc
+    suggested_multiple: 16.0
+    confidence: 0.8
+    emailed: true
+  ANN.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Ansell Ltd
+    suggested_multiple: 13.0
+    confidence: 0.8
+    emailed: true
+  ANZ.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: ANZ Group Holdings Ltd
+    suggested_multiple: 12.0
+    confidence: 0.9
+    emailed: true
+  APE.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Eagers Automotive Ltd
+    suggested_multiple: 9.0
+    confidence: 0.55
+    emailed: true
+  APX.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Appen Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  AR9.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Archtis Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  ARB.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: ARB Corporation Ltd
+    suggested_multiple: 17.0
+    confidence: 0.7
+    emailed: true
+  ASML:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: ASML Holding N.V. New York Registry Shares
+    suggested_multiple: 31.0
+    confidence: 0.8
+    emailed: true
+  ASX.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: ASX Ltd
+    suggested_multiple: 14.0
+    confidence: 0.6
+    emailed: true
+  ATP.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Atlas Pearls Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  ATZAF:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Aritzia Inc
+    suggested_multiple: 16.0
+    confidence: 0.8
+    emailed: true
+  AUB.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: AUB Group Ltd
+    suggested_multiple: 12.0
+    confidence: 0.9
+    emailed: true
+  AUTO:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Autoweb Inc
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  AVA.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: AVA Risk Group Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  AWC.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Alumina Ltd
+    suggested_multiple: 6.0
+    confidence: 0.6
+    emailed: true
+  AXON:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Axon Enterprise Inc.
+    suggested_multiple: 11.0
+    confidence: 0.55
+    emailed: true
+  BATRK:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Atlanta Braves Holdings, Inc. Series C Common Stock
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  BCPC:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Balchem Corporation
+    suggested_multiple: 12.0
+    confidence: 0.9
+    emailed: true
+  BHP.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: BHP Group Ltd
+    suggested_multiple: 12.0
+    confidence: 0.9
+    emailed: true
+  BIIB:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Biogen Inc
+    suggested_multiple: 15.0
+    confidence: 0.65
+    emailed: true
+  BIS.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Bisalloy Steel Group Ltd
+    suggested_multiple: 11.5
+    confidence: 0.9
+    emailed: true
+  BKW.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Brickworks Ltd
+    suggested_multiple: 6.0
+    confidence: 0.6
+    emailed: true
+  BMI:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Badger Meter Inc
+    suggested_multiple: 31.0
+    confidence: 0.8
+    emailed: true
+  BRG.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Breville Group Ltd
+    suggested_multiple: 22.0
+    confidence: 0.65
+    emailed: true
+  BXB.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Brambles Ltd
+    suggested_multiple: 18.0
+    confidence: 0.8
+    emailed: true
+  C79.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Chrysos Corporation Ltd
+    suggested_multiple: 9.0
+    confidence: 0.6
+    emailed: true
+  CAR.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: CAR Group Ltd
+    suggested_multiple: 15.0
+    confidence: 0.65
+    emailed: true
+  CASY:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Caseys General Stores Inc
+    suggested_multiple: 20.0
+    confidence: 0.65
+    emailed: true
+  CAT.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Catapult Group International Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  CBA.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Commonwealth Bank of Australia
+    suggested_multiple: 14.0
+    confidence: 0.9
+    emailed: true
+  CCL.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Cuscal Ltd
+    suggested_multiple: 11.0
+    confidence: 0.55
+    emailed: true
+  CDA.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Codan Ltd
+    suggested_multiple: 20.0
+    confidence: 0.65
+    emailed: true
+  CGS.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Cogstate Ltd
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  CME:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: CME Group Inc
+    suggested_multiple: 12.0
+    confidence: 0.6
+    emailed: true
+  CNU.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Chorus Ltd
+    suggested_multiple: 9.0
+    confidence: 0.8
+    emailed: true
+  COH.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Cochlear Ltd
+    suggested_multiple: 25.0
+    confidence: 0.65
+    emailed: true
+  COHR:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Coherent Inc
+    suggested_multiple: 11.0
+    confidence: 0.7
+    emailed: true
+  COL.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Coles Group Ltd
+    suggested_multiple: 17.0
+    confidence: 0.65
+    emailed: true
+  COO:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: The Cooper Companies, Inc
+    suggested_multiple: 11.0
+    confidence: 0.8
+    emailed: true
+  CPNG:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Coupang LLC
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  CPRT:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Copart Inc
+    suggested_multiple: 31.0
+    confidence: 0.65
+    emailed: true
+  CPU.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Computershare Ltd
+    suggested_multiple: 20.0
+    confidence: 0.65
+    emailed: true
+  CRWD:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Crowdstrike Holdings Inc
+    suggested_multiple: 13.0
+    confidence: 0.6
+    emailed: true
+  CSL.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: CSL Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  CSU:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Capital Senior Living Corporation
+    suggested_multiple: 6.0
+    confidence: 0.8
+    emailed: true
+  CTSH:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Cognizant Technology Solutions Corp Class A
+    suggested_multiple: 18.2
+    confidence: 0.8
+    emailed: true
+  CWP.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Cedar Woods Properties Ltd
+    suggested_multiple: null
+    confidence: 0.6
+    emailed: true
+  DASH:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: DoorDash, Inc. Class A Common Stock
+    suggested_multiple: 13.0
+    confidence: 0.6
+    emailed: true
+  DBI.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Dalrymple Bay Infrastructure Ltd
+    suggested_multiple: 9.0
+    confidence: 0.7
+    emailed: true
+  DDR.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Dicker Data Ltd
+    suggested_multiple: 20.0
+    confidence: 0.65
+    emailed: true
+  DMP.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Dominos PIZZA Enterprises Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  DOC.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Doctor Care Anywhere Group Plc
+    suggested_multiple: 11.0
+    confidence: 0.7
+    emailed: true
+  DRO.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Droneshield Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  DTL.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Data 3 Ltd
+    suggested_multiple: 21.0
+    confidence: 0.7
+    emailed: true
+  EDU.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: EDU Holdings Ltd
+    suggested_multiple: 16.0
+    confidence: 0.8
+    emailed: true
+  EDV.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Endeavour Group Ltd
+    suggested_multiple: 9.0
+    confidence: 0.8
+    emailed: true
+  EGH.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Eureka Group Holdings Ltd
+    suggested_multiple: null
+    confidence: 0.6
+    emailed: true
+  EOL.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Energy One Ltd
+    suggested_multiple: 15.0
+    confidence: 0.55
+    emailed: true
+  EOS.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Electro Optic Systems Holdings Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  EVT.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: EVT Ltd
+    suggested_multiple: 9.0
+    confidence: 0.8
+    emailed: true
+  FDC.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: FDC Consolidated Holdings Ltd.
+    suggested_multiple: 10.0
+    confidence: 0.4
+    emailed: true
+  FDV.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Frontier Digital Ventures Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  FERG:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Ferguson Plc
+    suggested_multiple: 13.0
+    confidence: 0.55
+    emailed: true
+  FFH:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Farm Family Holdings Inc
+    suggested_multiple: null
+    confidence: 0.5
+    emailed: true
+  FICO:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Fair Isaac Corporation
+    suggested_multiple: 27.0
+    confidence: 0.65
+    emailed: true
+  FID.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Fiducian Group Ltd
+    suggested_multiple: 14.0
+    confidence: 0.6
+    emailed: true
+  FIZZ:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: National Beverage Corp
+    suggested_multiple: 21.0
+    confidence: 0.8
+    emailed: true
+  FMG.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Fortescue Ltd
+    suggested_multiple: 8.5
+    confidence: 0.9
+    emailed: true
+  FND:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Floor & Decor Holdings Inc
+    suggested_multiple: 13.0
+    confidence: 0.7
+    emailed: true
+  FPH.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Fisher & Paykel Healthcare Corporation Ltd
+    suggested_multiple: 19.0
+    confidence: 0.65
+    emailed: true
+  FRI.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Finbar Group Ltd
+    suggested_multiple: null
+    confidence: 0.6
+    emailed: true
+  GDG.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Generation Development Group Ltd
+    suggested_multiple: 10.0
+    confidence: 0.9
+    emailed: true
+  GILD:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Gilead Sciences Inc
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  GMG.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Goodman Group
+    suggested_multiple: null
+    confidence: 0.9
+    emailed: true
+  GNP.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Genusplus Group Ltd
+    suggested_multiple: 15.6
+    confidence: 0.8
+    emailed: true
+  GOAT.AX:
+    archetype: unclassified
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-18'
+    company: Vaneck Morningstar International Wide Moat ETF
+    suggested_multiple: null
+    confidence: 0.0
+    emailed: true
+  GQG.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: GQG Partners Inc
+    suggested_multiple: 12.0
+    confidence: 0.6
+    emailed: true
+  GRAB:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Grab Holdings Ltd
+    suggested_multiple: 13.0
+    confidence: 0.6
+    emailed: true
+  GTK.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Gentrack Group Ltd
+    suggested_multiple: 15.0
+    confidence: 0.55
+    emailed: true
+  HEI:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Heico Corporation
+    suggested_multiple: 20.0
+    confidence: 0.8
+    emailed: true
+  HLS.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Healius Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  HPG.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Hipages Group Holdings Ltd
+    suggested_multiple: 18.0
+    confidence: 0.8
+    emailed: true
+  HSN.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Hansen Technologies Ltd
+    suggested_multiple: 18.0
+    confidence: 0.65
+    emailed: true
+  HUB.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: HUB24 Ltd
+    suggested_multiple: 12.0
+    confidence: 0.6
+    emailed: true
+  HVN.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Harvey Norman Holdings Ltd
+    suggested_multiple: 11.2
+    confidence: 0.7
+    emailed: true
+  HWM:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Howmet Aerospace Inc
+    suggested_multiple: 16.0
+    confidence: 0.65
+    emailed: true
+  IAG.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Insurance Australia Group Ltd
+    suggested_multiple: 10.0
+    confidence: 0.6
+    emailed: true
+  IFT.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Infratil Ltd
+    suggested_multiple: null
+    confidence: 0.9
+    emailed: true
+  IMB.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Intelligent Monitoring Group Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  INTU:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Intuit Inc
+    suggested_multiple: 20.0
+    confidence: 0.65
+    emailed: true
+  IPG.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Ipd Group Ltd
+    suggested_multiple: 16.0
+    confidence: 0.8
+    emailed: true
+  IPH.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: IPH Ltd
+    suggested_multiple: 17.0
+    confidence: 0.7
+    emailed: true
+  IRE.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Iress Ltd
+    suggested_multiple: 13.0
+    confidence: 0.7
+    emailed: true
+  JBH.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: JB Hi-Fi Ltd
+    suggested_multiple: 16.3
+    confidence: 0.65
+    emailed: true
+  JHX.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: James Hardie Industries Plc
+    suggested_multiple: 8.0
+    confidence: 0.9
+    emailed: true
+  JIN.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Jumbo Interactive Ltd
+    suggested_multiple: 29.0
+    confidence: 0.8
+    emailed: true
+  KAR.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Karoon Energy Ltd
+    suggested_multiple: 6.3
+    confidence: 0.9
+    emailed: true
+  KKR:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: KKR & Co. Inc.
+    suggested_multiple: 10.0
+    confidence: 0.6
+    emailed: true
+  KOV.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Korvest Ltd
+    suggested_multiple: 13.4
+    confidence: 0.8
+    emailed: true
+  KYP.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Kinatico Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  LAU.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Lindsay Australia Ltd
+    suggested_multiple: 11.0
+    confidence: 0.7
+    emailed: true
+  LGI.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: LGI Ltd
+    suggested_multiple: null
+    confidence: 0.9
+    emailed: true
+  LOV.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Lovisa Holdings Ltd
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  LSEG:
+    archetype: unclassified
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-18'
+    company: ''
+    suggested_multiple: null
+    confidence: 0.0
+    emailed: true
+  LULU:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Lululemon Athletica Inc.
+    suggested_multiple: 29.0
+    confidence: 0.8
+    emailed: true
+  LYL.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Lycopodium Ltd
+    suggested_multiple: 13.3
+    confidence: 0.8
+    emailed: true
+  MA:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Mastercard Inc
+    suggested_multiple: 14.0
+    confidence: 0.6
+    emailed: true
+  MAF.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: MA Financial Group Ltd
+    suggested_multiple: 12.0
+    confidence: 0.6
+    emailed: true
+  MAQ.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Macquarie Technology Group Ltd
+    suggested_multiple: 13.0
+    confidence: 0.8
+    emailed: true
+  MELI:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: MercadoLibre Inc.
+    suggested_multiple: 16.0
+    confidence: 0.65
+    emailed: true
+  META:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Meta Platforms Inc.
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  MFT.NZ:
+    archetype: unclassified
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-18'
+    company: ''
+    suggested_multiple: null
+    confidence: 0.0
+    emailed: true
+  MIDD:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Middleby Corp
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  MIN.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Mineral Resources Ltd
+    suggested_multiple: 6.0
+    confidence: 0.9
+    emailed: true
+  MMS.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Mcmillan Shakespeare Ltd
+    suggested_multiple: 15.0
+    confidence: 0.55
+    emailed: true
+  MNST:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Monster Beverage Corp
+    suggested_multiple: 31.0
+    confidence: 0.8
+    emailed: true
+  MOG-A:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Moog Inc
+    suggested_multiple: 15.0
+    confidence: 0.55
+    emailed: true
+  MP1.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Megaport Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  MQG.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Macquarie Group Ltd
+    suggested_multiple: 14.0
+    confidence: 0.6
+    emailed: true
+  MSFT:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Microsoft Corporation
+    suggested_multiple: 29.0
+    confidence: 0.8
+    emailed: true
+  MSV.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Mitchell Services Ltd
+    suggested_multiple: 10.0
+    confidence: 0.9
+    emailed: true
+  MTO.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Motorcycle Holdings Ltd
+    suggested_multiple: 11.2
+    confidence: 0.7
+    emailed: true
+  MVP.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Medical Developments International Ltd
+    suggested_multiple: 13.0
+    confidence: 0.8
+    emailed: true
+  MYG.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Mayfield Group Holdings Ltd
+    suggested_multiple: 6.0
+    confidence: 0.8
+    emailed: true
+  NAB.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: National Australia Bank Ltd
+    suggested_multiple: 12.0
+    confidence: 0.9
+    emailed: true
+  NFLX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Netflix Inc
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  NHC.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: New Hope Corporation Ltd
+    suggested_multiple: 8.6
+    confidence: 0.9
+    emailed: true
+  NHF.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: NIB Holdings Ltd
+    suggested_multiple: 14.0
+    confidence: 0.9
+    emailed: true
+  NVDA:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: NVIDIA Corporation
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  NVR:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: NVR Inc
+    suggested_multiple: 16.9
+    confidence: 0.8
+    emailed: true
+  NWL.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Netwealth Group Ltd
+    suggested_multiple: 12.0
+    confidence: 0.6
+    emailed: true
+  NXT.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: NEXTDC Ltd
+    suggested_multiple: 9.0
+    confidence: 0.7
+    emailed: true
+  OCC.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Orthocell Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  OCL.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Objective Corporation Ltd
+    suggested_multiple: 24.0
+    confidence: 0.8
+    emailed: true
+  ODFL:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Old Dominion Freight Line Inc
+    suggested_multiple: 22.0
+    confidence: 0.8
+    emailed: true
+  OFX.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: OFX Group Ltd
+    suggested_multiple: 10.0
+    confidence: 0.6
+    emailed: true
+  ORG.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Origin Energy Ltd
+    suggested_multiple: 8.0
+    confidence: 0.9
+    emailed: true
+  ORI.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Orica Ltd
+    suggested_multiple: 6.0
+    confidence: 0.9
+    emailed: true
+  ORLY:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: O’Reilly Automotive Inc
+    suggested_multiple: 29.0
+    confidence: 0.65
+    emailed: true
+  PLS.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Pilbara Minerals Ltd
+    suggested_multiple: 10.0
+    confidence: 0.9
+    emailed: true
+  PLT.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Plenti Group Ltd
+    suggested_multiple: 10.0
+    confidence: 0.8
+    emailed: true
+  PME.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Pro Medicus Ltd
+    suggested_multiple: 31.0
+    confidence: 0.8
+    emailed: true
+  PMV.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Premier Investments Ltd
+    suggested_multiple: 17.0
+    confidence: 0.7
+    emailed: true
+  PNI.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Pinnacle Investment Management Group Ltd
+    suggested_multiple: 14.0
+    confidence: 0.6
+    emailed: true
+  PNV.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Polynovo Ltd
+    suggested_multiple: 18.0
+    confidence: 0.8
+    emailed: true
+  POOL:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Pool Corporation
+    suggested_multiple: 20.0
+    confidence: 0.65
+    emailed: true
+  PPS.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Praemium Ltd
+    suggested_multiple: 20.0
+    confidence: 0.8
+    emailed: true
+  PWH.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: PWR Holdings Ltd
+    suggested_multiple: 18.0
+    confidence: 0.8
+    emailed: true
+  QAL.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Qualitas Ltd
+    suggested_multiple: null
+    confidence: 0.6
+    emailed: true
+  QOR.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: QORIA Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  QXO:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: QXO, Inc.
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  RACE:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Ferrari NV
+    suggested_multiple: 29.0
+    confidence: 0.8
+    emailed: true
+  REA.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: REA Group Ltd
+    suggested_multiple: 29.0
+    confidence: 0.8
+    emailed: true
+  REH.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Reece Ltd
+    suggested_multiple: 15.0
+    confidence: 0.55
+    emailed: true
+  RGN.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Region Group
+    suggested_multiple: null
+    confidence: 0.9
+    emailed: true
+  RHC.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Ramsay Health Care Ltd
+    suggested_multiple: 11.0
+    confidence: 0.65
+    emailed: true
+  RIO.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: RIO Tinto Ltd
+    suggested_multiple: 10.0
+    confidence: 0.9
+    emailed: true
+  RKLB:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Rocket Lab USA Inc.
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  RMD:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: ResMed Inc
+    suggested_multiple: 31.0
+    confidence: 0.8
+    emailed: true
+  RMD.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Resmed Inc
+    suggested_multiple: 31.0
+    confidence: 0.8
+    emailed: true
+  RMV:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: RMV
+    suggested_multiple: null
+    confidence: 0.5
+    emailed: true
+  ROST:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Ross Stores Inc
+    suggested_multiple: 25.6
+    confidence: 0.8
+    emailed: true
+  RR.L:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Rolls-Royce Holdings PLC
+    suggested_multiple: 20.0
+    confidence: 0.8
+    emailed: true
+  RTH.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Ras Technology Holdings Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  RUL.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Rpmglobal Holdings Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  S32.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: SOUTH32 Ltd
+    suggested_multiple: 8.0
+    confidence: 0.9
+    emailed: true
+  SDR.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Siteminder Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  SDV.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Scidev Ltd
+    suggested_multiple: 8.0
+    confidence: 0.6
+    emailed: true
+  SEK.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Seek Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  SGH.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: SGH Ltd
+    suggested_multiple: 13.0
+    confidence: 0.55
+    emailed: true
+  SGLLV.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Ricegrowers Ltd
+    suggested_multiple: 10.7
+    confidence: 0.65
+    emailed: true
+  SHA.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Shape Australia Corporation Ltd
+    suggested_multiple: 17.0
+    confidence: 0.5
+    emailed: true
+  SHJ.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Shine Justice Ltd
+    suggested_multiple: 8.9
+    confidence: 0.7
+    emailed: true
+  SHL.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Sonic Healthcare Ltd
+    suggested_multiple: 11.0
+    confidence: 0.65
+    emailed: true
+  SIG.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Sigma Healthcare Ltd
+    suggested_multiple: 11.0
+    confidence: 0.8
+    emailed: true
+  SKS.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: SKS Technologies Group Ltd
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  SOL.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Washington H Soul Pattinson & Company Ltd
+    suggested_multiple: 8.0
+    confidence: 0.9
+    emailed: true
+  SPZ.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Smart Parking Ltd
+    suggested_multiple: 18.0
+    confidence: 0.8
+    emailed: true
+  SRG.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: SRG Global Ltd
+    suggested_multiple: 16.0
+    confidence: 0.8
+    emailed: true
+  SRV.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Servcorp Ltd
+    suggested_multiple: null
+    confidence: 0.6
+    emailed: true
+  SUL.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Super Retail Group Ltd
+    suggested_multiple: 13.8
+    confidence: 0.55
+    emailed: true
+  SXE.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Southern Cross Electrical Engineering Ltd
+    suggested_multiple: 15.4
+    confidence: 0.65
+    emailed: true
+  TAH.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Tabcorp Holdings Ltd
+    suggested_multiple: 8.3
+    confidence: 0.7
+    emailed: true
+  TCL.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Transurban Group
+    suggested_multiple: null
+    confidence: 0.9
+    emailed: true
+  TJX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: The TJX Companies Inc
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  TLC.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: The Lottery Corporation Ltd
+    suggested_multiple: 13.0
+    confidence: 0.55
+    emailed: true
+  TLS.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Telstra Group Ltd
+    suggested_multiple: 17.0
+    confidence: 0.65
+    emailed: true
+  TNE.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Aussie Tech Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Technology One Ltd
+    suggested_multiple: 29.0
+    confidence: 0.8
+    emailed: true
+  TOST:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Toast Inc
+    suggested_multiple: 10.0
+    confidence: 0.5
+    emailed: true
+  TPW.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Temple & Webster Group Ltd
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  TTD:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Trade Desk Inc
+    suggested_multiple: 20.0
+    confidence: 0.65
+    emailed: true
+  TWE.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Treasury Wine Estates Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  U:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Unity Software Inc
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  UNI.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Universal Store Holdings Ltd
+    suggested_multiple: 18.0
+    confidence: 0.65
+    emailed: true
+  V:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Cornerstone Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Visa Inc. Class A
+    suggested_multiple: 14.0
+    confidence: 0.6
+    emailed: true
+  VGS.AX:
+    archetype: unclassified
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-18'
+    company: Vanguard MSCI INDEX International Shares ETF
+    suggested_multiple: null
+    confidence: 0.0
+    emailed: true
+  WBC.AX:
+    archetype: financial
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Westpac Banking Corporation
+    suggested_multiple: 12.0
+    confidence: 0.9
+    emailed: true
+  WDS.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    - Portfolio
+    active: true
+    last_classified: '2026-10-06'
+    company: Woodside Energy Group Ltd
+    suggested_multiple: 6.0
+    confidence: 0.9
+    emailed: true
+  WES.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Wesfarmers Ltd
+    suggested_multiple: 18.0
+    confidence: 0.65
+    emailed: true
+  WHC.AX:
+    archetype: cyclical
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Whitehaven Coal Ltd
+    suggested_multiple: 9.9
+    confidence: 0.9
+    emailed: true
+  WING:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Nap Taker Investing
+    active: true
+    last_classified: '2026-10-06'
+    company: Wingstop Inc
+    suggested_multiple: 27.0
+    confidence: 0.8
+    emailed: true
+  WOW.AX:
+    archetype: defensive_mature
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Woolworths Group Ltd
+    suggested_multiple: 11.0
+    confidence: 0.8
+    emailed: true
+  WPR.AX:
+    archetype: property_infra
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - Income Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Waypoint REIT
+    suggested_multiple: null
+    confidence: 0.9
+    emailed: true
+  WSO:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - TII75 Watchlist
+    active: true
+    last_classified: '2026-10-06'
+    company: Watsco Inc
+    suggested_multiple: 22.0
+    confidence: 0.65
+    emailed: true
+  WTC.AX:
+    archetype: quality_steady
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Wisetech Global Ltd
+    suggested_multiple: 16.0
+    confidence: 0.8
+    emailed: true
+  XRF.AX:
+    archetype: compounder
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: XRF Scientific Ltd
+    suggested_multiple: 20.6
+    confidence: 0.65
+    emailed: true
+  XRG.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Xreality Group Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true
+  XRO.AX:
+    archetype: early_growth
+    status: auto
+    override_multiple: null
+    override_reason: ''
+    structural_headwind: false
+    lists:
+    - JM Watch List
+    active: true
+    last_classified: '2026-10-06'
+    company: Xero Ltd
+    suggested_multiple: null
+    confidence: 0.65
+    emailed: true

@@ -1,0 +1,165 @@
+name: Harry Hindsight
+
+# The Chief Sceptic. Reads Bob / Sally / Wally / Theo outputs already in the
+# repo, gates deterministically, and only calls the model when a gate fires.
+# Emails a Bob-style card per report with the full analysis as a PDF attachment.
+#
+# Harry's memory (case files, SQLite, reports, bias profile) lives in
+# hindsight_data/ (gitignored, never committed) and is carried between runs
+# in the Actions cache, the same way Bob carries state_seen.json. No second
+# repo, no extra secret. Holdings come from data/decisions.json and theses/
+# already in this repo.
+#
+# The old private_repo store still works if picked by hand (store input or
+# repo variable HINDSIGHT_STORE=private_repo), but it is no longer the default.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "daily (triage + events), sell (one holding), sweep (every holding with a thesis), portfolio, autopsy, scorecard"
+        type: choice
+        options: [daily, sell, sweep, portfolio, autopsy, scorecard]
+        default: daily
+      ticker:
+        description: "For mode=sell: the holding to review, e.g. NHC"
+        required: false
+        default: ""
+      force:
+        description: "Re-run even if this event was already reviewed"
+        type: boolean
+        default: false
+      store:
+        description: "Where case files go. default = repo variable HINDSIGHT_STORE, else local (kept between runs in the Actions cache)."
+        type: choice
+        options: [default, private_repo, local]
+        default: default
+  # DISABLED 2026-10-10: this used to auto-fire on every completion of Bob,
+  # Wally and Sally -- including a Bob catch-up run that stood down and sent
+  # nothing. That fired Harry 4 times in one morning (see the cancel-in-
+  # progress fix just above in git history and CLAUDE.md's Harry section for
+  # the full story), and separately JM flagged that daily/auto mode reviews
+  # more than the real portfolio. Turned off until JM decides what the
+  # auto-run should actually cover; workflow_dispatch below still works for
+  # an on-demand run. Restore by uncommenting:
+  # workflow_run:
+  #   workflows:
+  #     - Daily Announcement Digest
+  #     - Wally Watchlist Screening
+  #     - Selling Sally Weekly Review
+  #   types: [completed]
+
+concurrency:
+  group: captain-hindsight
+  # true, not false: Bob's DST-safety crons (up to 3 fires/morning) and its
+  # catch-up stand-down both still complete the workflow and retrigger this
+  # one, even when nothing new happened. Queuing them (cancel-in-progress:
+  # false) let that happen 3x on 2026-10-10 and 2 of the 3 runs failed --
+  # each later run rebased its own "Harry data [skip ci]" commit onto a
+  # docs/data/harry.json origin had already moved under it, hitting a merge
+  # conflict. Cancelling a stale queued/in-progress run when a newer trigger
+  # lands collapses a burst of Bob/Wally/Sally completions into one.
+  cancel-in-progress: true
+
+jobs:
+  hindsight:
+    runs-on: ubuntu-latest
+    permissions:
+      # write: the run commits docs/data/harry.json + the rebuilt dashboard
+      contents: write
+    env:
+      HINDSIGHT_STORE: ${{ (inputs.store && inputs.store != 'default') && inputs.store || vars.HINDSIGHT_STORE || 'local' }}
+    steps:
+      - name: Check out repo (full history, for thesis versions and Sally's flag streak)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyyaml pydantic anthropic pandas openpyxl weasyprint
+
+      - name: Restore Harry's memory
+        if: env.HINDSIGHT_STORE == 'local'
+        uses: actions/cache/restore@v4
+        with:
+          path: hindsight_data
+          key: hindsight-data-${{ github.run_id }}
+          restore-keys: |
+            hindsight-data-
+
+      - name: Check out private store
+        if: env.HINDSIGHT_STORE == 'private_repo'
+        uses: actions/checkout@v4
+        with:
+          repository: JohnnyM77/Reporting-Agent-private
+          token: ${{ secrets.HINDSIGHT_PRIVATE_REPO_TOKEN }}
+          path: hindsight_private
+
+      - name: Run Harry Hindsight
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Half-price Message Batches on automatic runs; a manual run goes direct
+          # so you get the answer straight away. Never fewer answers: anything the
+          # batch doesn't return within LLM_BATCH_MAX_WAIT_MIN is sent direct.
+          LLM_BATCH: ${{ github.event_name == 'workflow_dispatch' && '0' || '1' }}
+          LLM_BATCH_MAX_WAIT_MIN: "30"
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          CLAUDE_MODEL: claude-sonnet-4-6
+          # a sweep reviews every holding with a thesis (~15), so it gets a bigger cap
+          HINDSIGHT_MAX_LLM_CALLS: ${{ inputs.mode == 'sweep' && '25' || '10' }}
+          HINDSIGHT_MAX_TOKENS_FULL: "16000"
+          HINDSIGHT_PRIVATE_REPO_DIR: ${{ github.workspace }}/hindsight_private
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          MODE: ${{ inputs.mode || 'daily' }}
+          TICKER: ${{ inputs.ticker }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
+        run: |
+          if [ "$MODE" = "sell" ]; then
+            if [ -z "$TICKER" ]; then echo "mode=sell needs a ticker" >&2; exit 2; fi
+            python -m hindsight sell "$TICKER" $FORCE
+          else
+            python -m hindsight run --mode "$MODE" $FORCE
+          fi
+
+      - name: Publish Harry to the dashboard
+        # Public-safe verdict summary only (see hindsight/web.py). ASCII-only
+        # commit messages, same rule as the other agents.
+        if: always()
+        run: |
+          if [ ! -f docs/data/harry.json ] && [ ! -f data/harry_flags.yaml ] && [ ! -f docs/data/harry_theses.json ]; then echo "nothing to publish this run"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # harry_flags.yaml is Harry's hand-off to Sally (thesis broken -> sell review);
+          # harry_theses.json is his thesis ledger, read by Theo and the site
+          for f in docs/data/harry.json data/harry_flags.yaml docs/data/harry_theses.json; do [ -f "$f" ] && git add "$f"; done
+          git diff --staged --quiet || git commit -m "Harry data [skip ci]"
+          git pull --rebase origin HEAD
+          python scripts/build_dashboard.py
+          git add docs/index.html docs/data/bob_history.json docs/data/slinger_history.json docs/data/us_history.json
+          git diff --staged --quiet || git commit -m "Dashboard update -- Harry [skip ci]"
+          git push origin HEAD
+
+      - name: Save Harry's memory
+        if: always() && env.HINDSIGHT_STORE == 'local'
+        uses: actions/cache/save@v4
+        with:
+          path: hindsight_data
+          key: hindsight-data-${{ github.run_id }}
+
+      - name: Commit private store
+        if: always() && env.HINDSIGHT_STORE == 'private_repo'
+        run: |
+          if [ ! -d hindsight_private/.git ]; then echo "no private checkout, nothing to commit"; exit 0; fi
+          cd hindsight_private
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || git commit -q -m "Harry Hindsight run ${{ github.run_id }}"
+          git push -q

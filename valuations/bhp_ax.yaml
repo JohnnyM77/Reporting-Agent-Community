@@ -1,0 +1,165 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# BHP.AX — BHP Group Limited  |  Value Chart Config
+# World's largest diversified miner — iron ore, copper, coal (divested), potash.
+# Classic cyclical: EPS swings wildly with commodity prices.
+# Use normalised through-cycle EPS for buy/sell decisions, not peak earnings.
+# ──────────────────────────────────────────────────────────────────────────────
+
+ticker: BHP.AX
+company_name: BHP Group Limited
+business: "Diversified mining — iron ore (largest), copper, nickel; potash (future); Pilbara + Olympic Dam"
+exchange: ASX
+
+stock_type: cyclical         # Classic commodity cyclical — 'low P/E = cheap' is INVERTED at peak
+
+buy_multiple: 13            # JM, Oct 2026: the king of miners; 13x is the least you'd pay and be happy
+sell_multiple: 20           # JM, Oct 2026: sell only at 20x or more (fair ~14-16x through the cycle)
+rror: 0.06                  # 6% — commodity/cyclical stocks warrant higher return hurdle
+norm_eps: 250               # Through-cycle normalised EPS ~$2.50 (250 cents). Update as view evolves.
+
+chart:
+  dimensions:
+    width: 34
+    height: 20
+
+  left_axis:
+    label: "Price (AUD $)"
+    min: 0.0
+    max: 60.0             # BHP peaked ~$52 in FY2022; $60 gives headroom
+    major_unit: 5.0
+    num_fmt: '"$"#,##0.00'
+
+  right_axis:
+    label: "P/E Ratio"
+    min: 0.0
+    max: 20.0             # Cap at 20x — cyclicals rarely go beyond this on real earnings
+    major_unit: 2.0
+    num_fmt: "0.0"
+
+  x_axis:
+    num_fmt: "MMM-YY"
+    tick_label_skip: 26
+    tick_mark_skip: 26
+
+  lines:
+    price:
+      color: "1565C0"
+      width_emu: 9525
+      style: solid
+    value_buy:
+      color: "1A5E20"
+      width_emu: 19050
+      style: dash
+    value_sell:
+      color: "C0392B"
+      width_emu: 19050
+      style: dash
+    div_rror:
+      color: "2E7D32"
+      width_emu: 19050
+      style: dash
+    pe_smooth:
+      color: "B8860B"
+      width_emu: 15875
+      style: solid
+
+  pe_smooth_days: 60
+  legend_position: "t"
+  legend_overlay: true
+  axis_title_box:
+    fill: "FFFF00"
+    border_color: "000000"
+    border_width_emu: 9525
+    text_bold: true
+    text_color: "000000"
+    font_size_pt: 9
+  legend_box:
+    fill: "FFFFFF"
+    border_color: "404040"
+    border_width_emu: 12700
+
+price_data:
+  frequency: weekly
+  resample_day: "W-FRI"
+  start_date: "2013-08-01"
+  source_hint: "marketindex.com.au/asx/bhp — export daily CSV (Date as YYYYMMDD)"
+  stockhistory_formula: '=STOCKHISTORY("BHP.AX",DATE(2016,1,1),TODAY(),0,1,0,1)'
+
+# ── Earnings history ──────────────────────────────────────────────────────────
+# NO ESTIMATES. Every EPS figure is reported, with its source.
+# BHP reports in US DOLLARS: ttm_eps / eps below are US cents per share
+# (statutory basic EPS, attributable). The value wedge converts each week's
+# EPS to A$ at that week's USDAUD rate, because the shares trade in A$.
+# FY ends 30 June: half-year results ~Feb, full year ~Aug.
+#
+# `earnings:` is GENERATED from the Simply Wall St export — do not hand-edit:
+#   cd sunday-sally && python -m src.sws_import ../data/sws_csv/ASX_BHP.csv --ticker BHP --write
+# This export (filed Feb 2026) gives one trailing-12-month EPS per year, to
+# each 31 December, Dec 2015 - Dec 2025. Re-export from SWS to pick up FY26.
+eps_currency: USD
+eps_basis: reported_ttm
+earnings:
+  - {date: "2016-02-23", period: "1H2016 TTM", period_end: "2015-12-31", ttm_eps: -114.858, ttm_div: 78, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = SWS dividend date (on or just after the results)"}
+  - {date: "2017-02-21", period: "1H2017 TTM", period_end: "2016-12-31", ttm_eps: 46.749, ttm_div: 54, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = SWS dividend date (on or just after the results)"}
+  - {date: "2018-02-20", period: "1H2018 TTM", period_end: "2017-12-31", ttm_eps: 94.017, ttm_div: 98, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = SWS dividend date (on or just after the results)"}
+  - {date: "2019-02-28", period: "1H2019 TTM", period_end: "2018-12-31", ttm_eps: 166.309, ttm_div: 118, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = ASX two-month reporting deadline (late, never early)"}
+  - {date: "2020-02-29", period: "1H2020 TTM", period_end: "2019-12-31", ttm_eps: 186.909, ttm_div: 143, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = ASX two-month reporting deadline (late, never early)"}
+  - {date: "2021-02-15", period: "1H2021 TTM", period_end: "2020-12-31", ttm_eps: 141.507, ttm_div: 156, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = SWS dividend date (on or just after the results)"}
+  - {date: "2022-02-14", period: "1H2022 TTM", period_end: "2021-12-31", ttm_eps: 314.924, ttm_div: 350, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = SWS dividend date (on or just after the results)"}
+  - {date: "2023-02-28", period: "1H2023 TTM", period_end: "2022-12-31", ttm_eps: 360.119, ttm_div: 265, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = ASX two-month reporting deadline (late, never early)"}
+  - {date: "2024-02-19", period: "1H2024 TTM", period_end: "2023-12-31", ttm_eps: 145.909, ttm_div: 152, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = SWS dividend date (on or just after the results)"}
+  - {date: "2025-02-28", period: "1H2025 TTM", period_end: "2024-12-31", ttm_eps: 224.554, ttm_div: 124, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = ASX two-month reporting deadline (late, never early)"}
+  - {date: "2026-02-17", period: "1H2026 TTM", period_end: "2025-12-31", ttm_eps: 201.813, ttm_div: 133, currency: "USD", source: "SWS export ASX_BHP.csv", notes: "Reported trailing-12-month EPS (SWS); release date = SWS dividend date (on or just after the results)"}
+
+# Reported figures SWS does not cover, from BHP's own results releases.
+# Same basis as SWS: BHP FY16 -120.0c, 1H16 -106.5c, 1H17 +60.2c give a
+# Dec-2016 TTM of 46.7c, exactly SWS's 1H2017 TTM figure.
+extra_eps:
+  # FY10-FY13 only feed the 5-year smoothing window before the chart starts.
+  # Dated at the ASX two-month deadline (31 Aug): late, never early.
+  - {date: "2010-08-31", period: "FY2010", eps: 228.6, source: "BHP Billiton Form 20-F (SEC): basic EPS FY2010 228.6 US cents"}
+  - {date: "2011-08-31", period: "FY2011", eps: 429.1, source: "BHP Billiton Form 20-F (SEC): basic EPS FY2011 429.1 US cents"}
+  - {date: "2012-08-31", period: "FY2012", eps: 289.6, source: "BHP Billiton results for the year ended 30 June 2012 (SEC 6-K): basic EPS 289.6 US cents"}
+  - {date: "2013-08-31", period: "FY2013", eps: 210.9, source: "BHP Billiton Form 20-F FY2014 (SEC): basic EPS FY2013 210.9 US cents"}
+  - {date: "2014-08-19", period: "FY2014", eps: 260.0, source: "BHP Billiton results for the year ended 30 June 2014 (19 Aug 2014): basic EPS 260.0 US cents"}
+  - {date: "2015-08-25", period: "FY2015", eps: 35.9, source: "BHP Billiton results for the year ended 30 June 2015 (25 Aug 2015): basic EPS 35.9 US cents"}
+  - {date: "2016-08-16", period: "FY2016", eps: -120.0, source: "BHP Billiton results for the year ended 30 June 2016 (16 Aug 2016): basic loss per share 120.0 US cents"}
+  - {date: "2026-08-18", period: "FY2026", eps: 193.6, source: "BHP results for the year ended 30 June 2026 (18 Aug 2026): basic EPS 193.6 US cents (FY25 177.8)"}
+
+# BUY/SELL framework. Set by JM in Oct 2026 and applied to the whole history
+# on purpose: it is a view of what BHP is worth on reported earnings, not a
+# record of past decisions. The 9x/16x it replaces was an unreviewed starter
+# config. Cross-check (Oct 2026): justified PE (1 - g/ROE)/(r - g) with
+# r 8.6% (SWS cost of equity), g 2.5-3%, ROE ~20% gives ~14-15x; so 13x is a
+# 10-15% margin under fair and 20x is ~35% over it.
+multiple_history:
+  - {date: "2014-08-14", buy_pe: 13, sell_pe: 20, reason: "JM's BHP framework (set Oct 2026), applied to the whole history"}
+
+# Through-the-cycle EPS. A miner's reported EPS swings 5x between trough and
+# peak, so the wedge is set on a smoothed figure: at each result, the average
+# of the reported 12-month EPS figures released in the previous 5 years (no
+# look-ahead). The statutory corridor stays on the chart, faint, for reference.
+# FY16 (Samarco dam failure and impairments) is a one-off: left out of the
+# average, still shown as a loss on the statutory line.
+eps_smoothing:
+  years: 5
+  exclude: [FY2016]
+  reason: "BHP is a cyclical; the BUY/SELL corridor uses a 5-year average of reported EPS, statutory shown faint behind it"
+
+# Fair value sits 30% of the way from BUY to SELL (13x + 0.3 x 7 = 15.1x):
+# JM buys well below value and sells well above it, not symmetrically.
+fair_split: 0.3
+
+# Periods deliberately left out, with the reason printed on the chart.
+eps_exclude:
+  - {period: "1H2016 TTM", reason: "SWS's Dec-2015 TTM (-114.9c) does not reconcile with BHP's reported FY15 / 1H15 / 1H16 figures around the South32 demerger, so it is not used"}
+
+# ── What happened (printed next to the EPS move it explains) ─────────────────
+period_notes:
+  FY2015: "Commodity collapse; South32 demerged May 2015"
+  FY2016: "Samarco dam failure and impairments: statutory loss"
+  1H2017 TTM: "Back to profit as iron ore and coal recover"
+  1H2022 TTM: "Iron ore boom"
+  1H2023 TTM: "Peak earnings"
+  1H2024 TTM: "Iron ore and coal prices off the peak"
+  FY2026: "FY26 result: basic EPS 193.6c"
