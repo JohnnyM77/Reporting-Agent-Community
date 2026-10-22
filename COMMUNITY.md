@@ -15,9 +15,11 @@ ASIC short-interest positions. Harry Hindsight is the sceptic who challenges
 each thesis. Theo keeps the theses honest over time — running a "Thinking in
 Bets" (Annie Duke) decision-quality interview, plus a business-quality check
 (moat, financials, competition), whenever a thesis is written or reviewed — and
-publishes them as slides. Esther stress-tests a single idea on demand, and
+publishes them as slides. Esther stress-tests a single idea on demand,
 Micky's Macro maps long-horizon structural trends through to candidate
-companies. README.md and CLAUDE.md describe how they fit together.
+companies, and Mike scores a company against Mikebrisy's published Stock
+Quality Assessment framework. README.md and CLAUDE.md describe how they fit
+together.
 
 ## What is different from the private copy
 
