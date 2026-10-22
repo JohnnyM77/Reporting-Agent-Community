@@ -24,6 +24,7 @@ from theo import drift as drift_mod  # noqa: E402
 from theo import ledger as ledger_mod  # noqa: E402
 from theo import publish as publish_mod  # noqa: E402
 from theo import render as render_mod  # noqa: E402
+from theo import review_cycle as review_mod  # noqa: E402
 from theo import season as season_mod  # noqa: E402
 from theo import signals as signals_mod  # noqa: E402
 from theo import thesis as thesis_mod  # noqa: E402
@@ -599,6 +600,108 @@ def test_private_workbooks_cannot_be_committed() -> None:
         check(pattern in ignored, f"{pattern} is gitignored")
 
 
+def _cal_thesis(reviews=None, calendar=None, status="HELD", exit=None):
+    data = {
+        "ticker": "AAA",
+        "the_bet": "A short, testable reason to own the thing.",
+        "pillars": [{"id": "P1", "claim": "c", "kill_condition": "k"}],
+        "reviews": reviews or [],
+        "status": status,
+    }
+    if calendar is not None:
+        data["reporting_calendar"] = calendar
+    if exit is not None:
+        data["exit"] = exit
+    return thesis_mod.from_dict(data)
+
+
+def test_reporting_calendar_and_annual_refresh():
+    print("\nthe reporting calendar parses and the annual refresh schedules per cycle")
+
+    june = _cal_thesis(calendar={"fy_end_month": 6})
+    check(june.fy_end_month == 6 and not june.reporting_calendar_assumed,
+          "fy_end_month: 6 parses as a stated June calendar")
+    dec = _cal_thesis(calendar="calendar")
+    check(dec.fy_end_month == 12, "basis 'calendar' resolves to December", str(dec.fy_end_month))
+    worded = _cal_thesis(calendar={"month": "December"})
+    check(worded.fy_end_month == 12, "a month name resolves too", str(worded.fy_end_month))
+    none = _cal_thesis()
+    check(none.fy_end_month == 6 and none.reporting_calendar_assumed,
+          "no calendar assumes June and says so")
+
+    # A June reporter: the result is out from 1 August.
+    sep = dt.date(2026, 9, 1)
+    due = review_mod.annual_status(_cal_thesis(calendar={"fy_end_month": 6}), sep)
+    check(due["due"] is True, "a June reporter with no refresh is due in September")
+
+    # Up to date (last cycle refreshed) and this year's result not yet out.
+    jul = dt.date(2026, 7, 15)
+    up_to_date = _cal_thesis(
+        calendar={"fy_end_month": 6},
+        reviews=[{"date": "2025-09-01", "verdict": "refreshed last cycle"}],
+    )
+    check(review_mod.annual_status(up_to_date, jul)["due"] is False,
+          "up to date, and this year's result not yet out, is not due")
+
+    reviewed = _cal_thesis(
+        calendar={"fy_end_month": 6},
+        reviews=[{"date": "2026-08-20", "trigger": "ANNUAL_REPORT", "verdict": "done"}],
+    )
+    check(review_mod.annual_status(reviewed, sep)["due"] is False,
+          "a refresh written after the result closes the cycle")
+
+    # A December (calendar-year) reporter: the result is out from 1 February.
+    mar = dt.date(2026, 3, 1)
+    dec_due = review_mod.annual_status(_cal_thesis(calendar="calendar"), mar)
+    check(dec_due["due"] is True, "a calendar-year reporter is due in March")
+    dec_jan = review_mod.annual_status(_cal_thesis(calendar="calendar"), dt.date(2026, 1, 15))
+    check(dec_jan["due"] is False, "but not in January, before its result is out")
+
+    gone = _cal_thesis(
+        calendar={"fy_end_month": 6}, status="EXITED",
+        exit={"date": "2026-01-01", "reason": "BETTER_USE", "sell_thesis": "Sold."},
+    )
+    check(review_mod.annual_status(gone, sep)["due"] is False, "an exited thesis is never due")
+
+
+def test_bob_full_year_result_becomes_a_refresh_question():
+    print("\na full-year result in Bob's digest opens the annual refresh")
+    bob = {
+        "last_run": "2026-08-20",
+        "high_impact": [
+            {"ticker": "AAA", "type": "results",
+             "analysis": {"period_type": "full_year", "period": "FY26"}},
+            {"ticker": "BBB", "type": "results", "analysis": {"period_type": "half_year"}},
+            {"ticker": "CCC", "type": "acquisition", "analysis": {}},
+        ],
+        "material": [], "fyi": [],
+    }
+    tmp = REPO_ROOT / "site" / "_test_bobannual"
+    tmp.mkdir(parents=True, exist_ok=True)
+    (tmp / "bob.json").write_text(json.dumps(bob), encoding="utf-8")
+
+    sigs = signals_mod.from_bob_annual(tmp / "bob.json")
+    check(len(sigs) == 1, "only the full-year result becomes a signal", str(len(sigs)))
+    check(sigs and sigs[0].ticker == "AAA" and sigs[0].kind == signals_mod.BOB_ANNUAL,
+          "and it is an ANNUAL_REPORT signal on the right ticker")
+
+    base = {"ticker": "AAA", "the_bet": "A short, testable reason to own the thing.",
+            "pillars": [{"id": "P1", "claim": "c", "kill_condition": "k"}]}
+    unanswered = thesis_mod.from_dict(base)
+    check(len(signals_mod.open_questions([unanswered], sigs)) == 1,
+          "an un-refreshed holding carries an open annual question")
+    answered = thesis_mod.from_dict({
+        **base,
+        "reviews": [{"date": "2026-08-21", "trigger": "ANNUAL_REPORT", "decision": "ACTED"}],
+    })
+    check(not signals_mod.open_questions([answered], sigs),
+          "writing the dated ANNUAL_REPORT review closes it")
+
+    for f in tmp.glob("*.json"):
+        f.unlink()
+    tmp.rmdir()
+
+
 # --------------------------------------------------------------------------
 # pytest: same inputs main() builds; a failed check() fails its test.
 # --------------------------------------------------------------------------
@@ -653,6 +756,8 @@ def main() -> int:
     test_bhp_irr_ladder(ledger)
     test_the_money_free_ledger_carries_no_money()
     test_private_workbooks_cannot_be_committed()
+    test_reporting_calendar_and_annual_refresh()
+    test_bob_full_year_result_becomes_a_refresh_question()
 
     for path in (tmp_dir / "index.html", tmp_dir / ".nojekyll"):
         path.unlink(missing_ok=True)

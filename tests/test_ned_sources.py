@@ -249,3 +249,23 @@ def test_email_shows_inbox_failure():
     plain, html = email_builder.build_email([], [], {}, 48, "d", newsletters=[],
                                             newsletter_status=("failed", "LOGIN failed"))
     assert "FAILED" in plain and "LOGIN failed" in html
+
+
+def test_email_backgrounds_live_on_table_cells_not_divs():
+    """Desktop Outlook half-paints <div> backgrounds (white stripes between
+    lines). Every coloured box must be a table cell; spans (badges) are fine."""
+    import re
+    news = sort_by_importance([_hit("Brambles CEO on pallets", "AFR", tier=1),
+                               _hit("ABB buy-back", "Kalkine Media", ticker="ABB", tier=3)])
+    nl = [{"label": "Kestrel Run", "subject": "Brief", "url": "https://k", "status": "ok",
+           "summary": "s", "items": [], "error": ""}]
+    for status in (("ok", ""), ("failed", "LOGIN failed")):
+        _, html = email_builder.build_email([], news, {}, 48, "d", newsletters=nl, newsletter_status=status)
+        for div in re.findall(r'<div style="([^"]*)"', html):
+            assert "background" not in div, div
+        assert html.startswith('<table role="presentation" width="100%"')
+        assert 'bgcolor="#0B1220"' in html
+    _, empty = email_builder.build_email([], [], {}, 48, "d")
+    assert "No mentions found this run." in empty
+    for div in re.findall(r'<div style="([^"]*)"', empty):
+        assert "background" not in div

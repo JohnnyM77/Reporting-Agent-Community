@@ -35,7 +35,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Use Python 3.14
         run: |
           # Use the machine-installed Python from CLAUDE.md
@@ -73,7 +73,7 @@ jobs:
 
       - name: Upload transcripts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ned-video-transcripts
           path: transcripts/

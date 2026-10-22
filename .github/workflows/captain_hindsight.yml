@@ -71,12 +71,12 @@ jobs:
       HINDSIGHT_STORE: ${{ (inputs.store && inputs.store != 'default') && inputs.store || vars.HINDSIGHT_STORE || 'local' }}
     steps:
       - name: Check out repo (full history, for thesis versions and Sally's flag streak)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -85,7 +85,7 @@ jobs:
 
       - name: Restore Harry's memory
         if: env.HINDSIGHT_STORE == 'local'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: hindsight_data
           key: hindsight-data-${{ github.run_id }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: Check out private store
         if: env.HINDSIGHT_STORE == 'private_repo'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: JohnnyM77/Reporting-Agent-private
           token: ${{ secrets.HINDSIGHT_PRIVATE_REPO_TOKEN }}
@@ -148,7 +148,7 @@ jobs:
 
       - name: Save Harry's memory
         if: always() && env.HINDSIGHT_STORE == 'local'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: hindsight_data
           key: hindsight-data-${{ github.run_id }}

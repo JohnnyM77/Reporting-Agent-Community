@@ -1,0 +1,73 @@
+name: Mike Stock Quality
+
+# Mikebrisy's Stock Quality Assessment Framework v3.1, scored exactly as
+# written: EODHD statutory statements for the quantitative criteria, one Claude
+# call per company (web search) for the Market Position evidence register and
+# permitted overlays, QA/QC certification (PASS or DRAFT), a PDF report and a
+# Bob-style email. Manual only. Commits nothing, publishes nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      list:
+        description: "Which list to assess"
+        type: choice
+        options: [mikebrisy_sample, portfolio]
+        default: mikebrisy_sample
+      tickers:
+        description: "Optional: assess these instead, e.g. PME,TNE,RMD"
+        required: false
+        default: ""
+      evidence:
+        description: "Run the Market Position evidence review (Claude + web search)"
+        type: boolean
+        default: true
+      email:
+        description: "Email the result"
+        type: boolean
+        default: true
+
+concurrency:
+  group: mike-${{ inputs.list }}-${{ inputs.tickers }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install pyyaml anthropic weasyprint pypdf
+      - name: Assess quality
+        env:
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          MIKE_MODEL: ${{ vars.MIKE_MODEL || 'claude-sonnet-4-6' }}
+          LIST: ${{ inputs.list }}
+          TICKERS: ${{ inputs.tickers }}
+        run: |
+          args=(--cache-dir outputs/mike/cache --out outputs/mike/run)
+          if [ -n "$TICKERS" ]; then args+=(--tickers "$TICKERS"); else args+=(--list "$LIST"); fi
+          if [ "${{ inputs.evidence }}" != "true" ]; then args+=(--no-evidence); fi
+          if [ "${{ inputs.email }}" = "true" ]; then args+=(--email); fi
+          python -m mike "${args[@]}"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mike-${{ inputs.list }}
+          path: |
+            outputs/mike/run/mike_report.pdf
+            outputs/mike/run/mike.json
+            outputs/mike/run/email.html
+          if-no-files-found: ignore

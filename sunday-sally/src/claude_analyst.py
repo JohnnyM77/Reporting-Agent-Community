@@ -135,7 +135,10 @@ RECOMMENDATION: [one clear action recommendation: {rec_options}, with brief rati
         response = llm_send(
             client,
             model="claude-opus-4-6",
-            max_tokens=1024,
+            # Thinking counts against max_tokens: at 1024 it used the lot on
+            # TWE (2026-10-18) and left no answer. Stays under the 8192
+            # streaming threshold.
+            max_tokens=6000,
             thinking={"type": "adaptive"},
             messages=[{"role": "user", "content": prompt}],
         )
@@ -144,7 +147,7 @@ RECOMMENDATION: [one clear action recommendation: {rec_options}, with brief rati
         text = response.text
 
         if not text:
-            _log(f"No text in response for {ticker}.")
+            _log(f"No text in response for {ticker} (stop_reason={response.stop_reason}).")
             return None
 
         result: dict[str, str] = {}

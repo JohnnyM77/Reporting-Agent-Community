@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from dashboard.common import favicon_data_uri
 
+# Private launcher for the Theo "Thinking in Bets" thesis-builder tool
+# (a claude.ai artifact on the owner's own account; opens for the owner only).
+THEO_INTERVIEW_URL = "https://claude.ai/artifact/RVkCEpQnYuaZtL3s2dsJAa"
+
 
 def render_page(sections: list[str], generated_at: str) -> str:
     """The full docs/index.html document."""
@@ -45,6 +49,21 @@ def render_page(sections: list[str], generated_at: str) -> str:
       letter-spacing: -0.3px;
     }}
     .logo span {{ color: #3b82f6; }}
+    .head-right {{
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }}
+    .theo-cta {{
+      background: #3b82f6;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 8px;
+      white-space: nowrap;
+    }}
+    .theo-cta:hover {{ background: #2563eb; text-decoration: none; }}
     .meta {{
       font-size: 12px;
       color: #64748b;
@@ -105,6 +124,8 @@ def render_page(sections: list[str], generated_at: str) -> str:
       .ned-grid {{ grid-template-columns: repeat(2, 1fr); }}
     }}
     @media (max-width: 700px) {{
+      header {{ flex-direction: column; align-items: flex-start; gap: 10px; }}
+      .head-right {{ width: 100%; justify-content: space-between; }}
       .card-header {{ flex-direction: column; gap: 8px; }}
       table {{ font-size: 11px; }}
       .ned-grid {{ grid-template-columns: 1fr; }}
@@ -114,7 +135,10 @@ def render_page(sections: list[str], generated_at: str) -> str:
 <body>
   <header>
     <div class="logo"><img src="{favicon}" alt="" width="26" height="26" style="vertical-align:-6px;border-radius:50%;margin-right:6px"> <span>Jzx</span> Portfolio Management</div>
-    <div class="meta">Auto-updated by GitHub Actions &nbsp;·&nbsp; Generated: {generated_at}</div>
+    <div class="head-right">
+      <a class="theo-cta" href="{THEO_INTERVIEW_URL}" target="_blank" rel="noopener">◆ Build a thesis with Theo</a>
+      <div class="meta">Auto-updated by GitHub Actions &nbsp;·&nbsp; Generated: {generated_at}</div>
+    </div>
   </header>
   <main>
     {main}

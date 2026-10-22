@@ -37,10 +37,10 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -48,7 +48,7 @@ jobs:
         # Per-accession dedup: without this the portfolio cron would
         # re-analyse and re-email the same 10-K for every ticker every
         # morning until a fresh filing lands.
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: state_seen_us.json
           key: seen-state-us-${{ github.ref_name }}
@@ -102,7 +102,7 @@ jobs:
         # gets cached). Cache key includes run_id so successive runs on
         # the same day each save without stepping on each other.
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: state_seen_us.json
           key: seen-state-us-${{ github.ref_name }}-${{ github.run_id }}
@@ -143,7 +143,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: us-daily
           path: outputs/us/

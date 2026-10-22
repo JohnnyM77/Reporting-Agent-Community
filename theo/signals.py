@@ -36,6 +36,10 @@ DASHBOARD_DIR = Path("docs/data")
 SALLY_TRIM = "SALLY_TRIM"
 SALLY_REVIEW = "SALLY_REVIEW"
 HARRY_BROKEN = "HARRY_BROKEN"
+# Bob picked up a full-year result for a holding. The annual refresh is the one
+# review Theo actively invites you to — answered, like any other, by a dated
+# review (trigger: ANNUAL_REPORT). Declining is fine; silence is recorded.
+BOB_ANNUAL = "ANNUAL_REPORT"
 
 # Decline this many times without writing a kill condition and it stops being
 # a judgement call and starts being a habit.
@@ -151,15 +155,63 @@ def from_harry(path: str | Path | None = None) -> list[Signal]:
     return out
 
 
+def from_bob_annual(path: str | Path | None = None) -> list[Signal]:
+    """Read Bob's digest (``bob.json``) for full-year results on holdings.
+
+    When Bob analyses a company's full-year result it lands on the dashboard as
+    a results item (``type: results``, ``analysis.period_type: full_year``).
+    That is the moment to update the thesis, so Theo turns it into an open
+    question — the once-a-year refresh, keyed to each company's own reporting
+    cycle because the result's arrival, not the calendar, is what fires it.
+
+    Bob is never modified and does not know Theo exists; this only reads.
+    """
+    data = _load_json(Path(path) if path else DASHBOARD_DIR / "bob.json")
+    when = _date(data.get("last_run"))
+    out: list[Signal] = []
+    seen: set[str] = set()
+    for tier in ("high_impact", "material", "fyi"):
+        for item in data.get(tier) or []:
+            if item.get("type") != "results":
+                continue
+            analysis = item.get("analysis") or {}
+            if str(analysis.get("period_type") or "").strip().lower() != "full_year":
+                continue
+            ticker = str(item.get("ticker", "")).strip().upper()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            period = str(analysis.get("period") or "").strip()
+            out.append(
+                Signal(
+                    source="Bob",
+                    ticker=ticker,
+                    kind=BOB_ANNUAL,
+                    detail=f"{period} full-year result picked up".strip(),
+                    date=when,
+                    question=(
+                        "Bob picked up the full-year result. Come in for the annual "
+                        "refresh when you can — not mandatory, but it is the cheapest "
+                        "honesty check there is: re-test each pillar against the new "
+                        "numbers and update the hold thesis."
+                    ),
+                )
+            )
+    return out
+
+
 def load_all(directory: str | Path | None = None) -> list[Signal]:
     """Every signal Theo currently knows how to read.
 
-    Bob's pillar-level observations are the obvious next source; the shape
-    here is deliberately generic so adding him is a new ``from_*`` function
-    and nothing else.
+    Each source is one ``from_*`` reader over another agent's dashboard JSON;
+    Theo never imports or calls those agents.
     """
     base = Path(directory) if directory else DASHBOARD_DIR
-    return from_sally(base / "sally.json") + from_harry(base / "harry_theses.json")
+    return (
+        from_sally(base / "sally.json")
+        + from_harry(base / "harry_theses.json")
+        + from_bob_annual(base / "bob.json")
+    )
 
 
 # --------------------------------------------------------------------------

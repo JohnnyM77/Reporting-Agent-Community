@@ -203,6 +203,12 @@ def build_message(
         |   +-- image/png  (Content-ID: <cid>, one per image)
         +-- attachments
     """
+    if body_html:
+        # Every agent's email passes here, so this one call makes all of them
+        # render solid in desktop Outlook (see shared/email_html.py).
+        from shared.email_html import outlook_safe
+        body_html = outlook_safe(body_html)
+
     if body_html and inline_images:
         root = MIMEMultipart("mixed")
         root["From"] = email_from

@@ -21,6 +21,7 @@ from . import drift as drift_mod
 from . import ledger as ledger_mod
 from . import publish as publish_mod
 from . import render as render_mod
+from . import review_cycle as review_mod
 from . import season as season_mod
 from . import signals as signals_mod
 from . import thesis as thesis_mod
@@ -235,6 +236,38 @@ def cmd_signals(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_reviews(args: argparse.Namespace) -> int:
+    """The annual-refresh schedule: which theses are due a yearly update."""
+    theses, _, today = _load(args)
+    live = [t for t in theses if not t.is_exited]
+    if not live:
+        print("No open theses.")
+        return EXIT_OK
+    rows = review_mod.due_now(live, today)
+    due = [r for r in rows if r["due"]]
+
+    print(f"Annual thesis refresh — as at {today.isoformat()}\n")
+    if due:
+        print(f"{len(due)} due now (the full-year result has landed, no refresh since):\n")
+        for r in due:
+            since = r["last_review"] or "never reviewed"
+            print(f"  DUE  {r['ticker']:<6} {r['basis']:<16} result ~{r['cycle_report_date']}  (last review: {since})")
+        print()
+    else:
+        print("Nothing due right now.\n")
+
+    upcoming = [r for r in rows if not r["due"]]
+    if upcoming:
+        print("On schedule:")
+        for r in upcoming:
+            print(f"  ok   {r['ticker']:<6} {r['basis']:<16} next cycle result ~{r['cycle_report_date']}")
+    print(
+        "\nNot mandatory. Answer a refresh with a dated review (trigger: ANNUAL_REPORT) "
+        "in the thesis file, or run the interview on the dashboard."
+    )
+    return EXIT_OK
+
+
 def cmd_dashboard(args: argparse.Namespace) -> int:
     """Emit docs/data/theo.json for the combined agent dashboard."""
     theses, ledger, today = _load(args)
@@ -267,12 +300,40 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
         )
 
     questions = signals_mod.open_questions(theses, sigs)
+
+    # Annual-refresh schedule (public-safe: no amounts) and the hold-through-sell
+    # record — the dated reviews that carry a trigger, i.e. the times another
+    # agent said sell and the reason to keep holding was written down. Only
+    # structural facts reach the public dashboard; the reasoning lives on the
+    # slide at /theo/.
+    annual = review_mod.due_now(theses, today)
+    hold_decisions = []
+    for thesis in theses:
+        for review in thesis.reviews:
+            if not review.trigger or review.date is None:
+                continue
+            hold_decisions.append(
+                {
+                    "ticker": thesis.ticker,
+                    "date": review.date.isoformat(),
+                    "trigger": review.trigger,
+                    "decision": review.decision or "RECORDED",
+                }
+            )
+    hold_decisions.sort(key=lambda d: d["date"], reverse=True)
+
     payload = {
         "last_run": today.isoformat(),
         "thesis_count": len(theses),
         "drifting": sum(1 for r in rows if r["verdict"] == "DRIFTING"),
         "watch": sum(1 for r in rows if r["verdict"] == "WATCH"),
         "clean": sum(1 for r in rows if r["verdict"] == "CLEAN"),
+        "maintenance": {
+            "annual_reviews": annual,
+            "due_count": sum(1 for a in annual if a["due"]),
+            "hold_decisions": hold_decisions[:20],
+            "hold_decision_count": len(hold_decisions),
+        },
         "theses": rows,
         "open_questions": [
             {
@@ -451,6 +512,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = subs.add_parser("signals", help="open questions from Bob/Wally/Sally")
     p.set_defaults(func=cmd_signals)
+
+    p = subs.add_parser("reviews-due", help="annual thesis-refresh schedule (per reporting calendar)")
+    p.set_defaults(func=cmd_reviews)
 
     p = subs.add_parser("dashboard", help="emit docs/data/theo.json for the combined site")
     p.add_argument("--out", default="docs/data/theo.json")

@@ -10,10 +10,14 @@ It is shared as-is, for people who want to read the code or run their own.
 Bob reads ASX announcements for every holding and writes up results days.
 Singapore Slinger and Bob USA do the same for SGX and SEC filings. Ned scans
 news, YouTube and podcasts. Wally screens the watchlists for value. Selling
-Sally reviews holdings weekly for valuation stretch. Harry Hindsight is the
-sceptic who challenges each thesis. Theo keeps the theses honest over time and
-publishes them as slides. Esther stress-tests a single idea on demand.
-README.md and CLAUDE.md describe how they fit together.
+Sally reviews holdings weekly for valuation stretch. Shorty reports the weekly
+ASIC short-interest positions. Harry Hindsight is the sceptic who challenges
+each thesis. Theo keeps the theses honest over time — running a "Thinking in
+Bets" (Annie Duke) decision-quality interview, plus a business-quality check
+(moat, financials, competition), whenever a thesis is written or reviewed — and
+publishes them as slides. Esther stress-tests a single idea on demand, and
+Micky's Macro maps long-horizon structural trends through to candidate
+companies. README.md and CLAUDE.md describe how they fit together.
 
 ## What is different from the private copy
 

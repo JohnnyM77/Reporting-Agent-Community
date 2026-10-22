@@ -1,567 +1,76 @@
-Bob the Bot
+# Investing Research & Intelligence Agents
 
-Portfolio Announcements Intelligence Agent
+This repository contains a collection of Python agents and scheduled workflows that support an individual investor's research process. The system ingests company announcements, market data, news and research; applies rule-based screening and model-assisted analysis; and publishes reports, dashboard data and review artifacts.
 
-Bob the Bot is an automated AI agent that monitors ASX announcements for companies in my investment Portfolio, analyses important updates, and delivers a daily intelligence briefing.
+**This is not just Bob the Bot.** Bob is one agent in a wider toolkit. The current codebase includes watchlist screening, valuation/sell-discipline reviews, news and macro research, thesis tracking, skeptical post-mortems, regional filing monitors, short-interest reporting, and on-demand company analysis.
 
-The goal is simple:
+## Start here
 
-Read everything so I don't have to. Surface the signal and ignore the noise.
+- **[Full agent workflow map](bot-guide/workflow-matrix.md)** — the end-to-end matrix requested for each agent: inputs and sources, processing, prompts/model/tooling, and outputs/destinations.
+- **[Investing Bot Guide](bot-guide/README.md)** — plain-English guide to each agent, schedules, limitations and code entry points.
+- **[Shared infrastructure map](docs/INFRASTRUCTURE.md)** — workflow-to-entry-point map and shared services.
+- **[Dashboard data](docs/data/)** — agent JSON outputs consumed by the dashboard builder.
+- **[Workflow definitions](.github/workflows/)** — schedules, manual inputs, runners and job steps.
 
-Instead of manually checking ASX announcements every day, Bob retrieves new filings, downloads important documents, runs AI analysis when appropriate, and sends a concise summary.
+## Agents at a glance
 
-System Overview
-                ┌──────────────────────────┐
-                │        My Portfolio      │
-                │       tickers.yaml       │
-                └─────────────┬────────────┘
-                              │
-                              ▼
-                ┌──────────────────────────┐
-                │     ASX Announcements    │
-                │      Data Retrieval      │
-                └─────────────┬────────────┘
-                              │
-                              ▼
-                ┌──────────────────────────┐
-                │       Bob the Bot        │
-                │      agent.py Engine     │
-                └─────────────┬────────────┘
-                              │
-             ┌────────────────┼────────────────┐
-             ▼                ▼                ▼
+| Agent / workflow | Purpose | Main entry point |
+|---|---|---|
+| **Bob the Bot (ASX)** | Monitors portfolio ASX announcements, classifies them, summarises routine items and deeply analyses selected material events. | [`agent.py`](agent.py), [`prompts.py`](prompts.py) |
+| **Bob USA** | Monitors configured US companies' SEC filings. | [`us_agent.py`](us_agent.py) |
+| **Singapore Slinger** | Monitors SGX announcements in a separate runner/fetch pipeline. | [`sgx_agent.py`](sgx_agent.py) |
+| **Wally** | Screens configured watchlists for price/valuation conditions and packages candidates with context. | [`wally/main.py`](wally/main.py) |
+| **Selling Sally** | Compares price with valuation ranges and historical multiples; surfaces sell/valuation review signals. | [`sunday-sally/src/main.py`](sunday-sally/src/main.py) |
+| **Ned** | Scans configured news, RSS, newsletters, YouTube and transcript sources for relevant information. | [`ned/main.py`](ned/main.py) |
+| **Micky's Macro** | Converts selected newsletters and macro research into structural-trend dossiers and company candidates. | [`mickys_macro/main.py`](mickys_macro/main.py) |
+| **Harry / Captain Hindsight** | Applies deterministic gates and skeptical model reviews to portfolio events, theses and decisions. | [`hindsight/runner.py`](hindsight/runner.py) |
+| **Theo** | Maintains structured thesis records and generates thesis views, drift signals and pre-results review material. | [`theo/cli.py`](theo/cli.py) |
+| **Esther the Wrestler** | On-demand company narrative, valuation and thesis challenge analysis. | [`esther/main.py`](esther/main.py) |
+| **Shorty** | Compares ASIC short-position reports and produces a weekly digest. | [`shorty_agent.py`](shorty_agent.py) |
+| **Results Pack Agent** | Builds a fuller analysis pack around a company results announcement. | [`results_pack_agent/`](results_pack_agent) |
 
-   ┌───────────────┐  ┌────────────────┐  ┌────────────────┐
-   │ Announcement   │  │  Document      │  │ AI Analysis    │
-   │ Classification │  │  Retrieval     │  │ (OpenAI API)   │
-   └───────┬───────┘  └───────┬────────┘  └────────┬───────┘
-           │                  │                    │
-           ▼                  ▼                    ▼
+The repository also has separate podcast/transcript workflows, dashboard rendering and publication, and shared utilities. A bot, a scheduled workflow and a dashboard card are not necessarily the same thing.
 
-   ┌───────────────┐  ┌────────────────┐  ┌────────────────┐
-   │ Portfolio     │  │ Google Drive   │  │ Strawman Post  │
-   │ Intelligence  │  │ Document Store │  │ Draft Generator│
-   └───────┬───────┘  └────────┬───────┘  └────────┬───────┘
-           │                   │                   │
-           └──────────────┬────┴─────────────┬─────┘
-                          ▼                  ▼
+## Typical system flow
 
-                    ┌───────────────┐
-                    │  Daily Email  │
-                    │ Intelligence  │
-                    │    Digest     │
-                    └───────────────┘
-What Bob Does
+1. **Ingest:** workflows retrieve filings, prices, newsletters, feeds, transcripts or existing agent outputs.
+2. **Prepare:** code normalises identifiers, removes duplicates, classifies documents/events and applies deterministic rules.
+3. **Analyse:** prompt modules define model tasks and output contracts. Model calls are selective where the implementation has gates or caps.
+4. **Deliver:** agents may email digests, save documents to Google Drive, write JSON under `docs/data/`, create reports/workbooks, or keep private review artifacts.
+5. **Publish:** the dashboard builder combines dashboard-facing JSON into `docs/index.html`; the Pages workflow is the shared publisher for the site and Theo slides.
 
-Every day Bob automatically:
+See the [workflow matrix](bot-guide/workflow-matrix.md) for each agent's concrete inputs, prompts/tools and outputs, and the [infrastructure map](docs/INFRASTRUCTURE.md) for workflow and shared-service details.
 
-Monitors ASX announcements for companies in my Portfolio
+## Important operational notes
 
-Identifies announcements released within the last 24 hours
+- **Read the workflow YAML, not just a bot's name, to establish when it runs.** Some workflows are scheduled; others are manual-only or support several run modes. Harry's event-triggered chaining is currently disabled in its workflow, so do not assume it runs whenever another agent completes.
+- **Treat flags as prompts for investigation, not trade instructions.** These agents support research and discipline; they do not replace checking primary sources or exercising investment judgment.
+- **Dashboard JSON is not necessarily the complete record.** Some agents keep richer artifacts or state outside `docs/data/`, including workflow-local or private storage.
+- **Master Engine is scaffolding, not a currently scheduled production agent.** See [`master_engine/README.md`](master_engine/README.md).
+- **Protect private portfolio data.** The repository documentation warns that the GitHub Pages site and community edition are public. Never add position dollar amounts, share counts, portfolio weights, credentials or other private information to public-facing files. Existing safeguards include [`shared/public_safety.py`](shared/public_safety.py) and [`scripts/leak_guard.py`](scripts/leak_guard.py).
 
-Avoids reporting the same announcement on consecutive days by tracking seen announcement IDs between runs
+## Local development
 
-Filters out routine filings and low-impact updates
+Most components are Python modules, but their dependencies and runtime assumptions differ. Some workflows use GitHub-hosted Ubuntu runners; SGX and certain transcript tasks use a self-hosted Windows runner. Check the relevant workflow and agent README before running locally.
 
-Downloads PDFs for meaningful announcements
-
-Extracts text from reports and presentations
-
-Runs AI analysis on major announcements
-
-Generates short summaries for quick review
-
-Saves important documents to Google Drive
-
-Sends a daily intelligence briefing email
-
-Bob focuses on signal over noise.
-
-Example Output
-
-Bob sends a daily briefing structured like this:
-
-Bob the Bot
-Daily Announcements Digest — last 24 hours
-
-HIGH IMPACT
-
-DRO — FY Results
-
-Revenue growth strong but margin compression continues.
-
-Analysis:
-[Detailed AI analysis]
-
-Open:
-https://www.asx.com.au/...
-
-Drive:
-https://drive.google.com/...
-
-------------------------------------------------
-
-MATERIAL
-
-TWE: Retirement of Chief Financial Officer
-So what: Leadership transition likely operational rather than strategic.
-
-Open:
-https://www.asx.com.au/...
-
-------------------------------------------------
-
-FYI
-
-ABB: Appendix 3Y Director Interest Notice
-So what: Routine filing.
-Portfolio Monitoring
-
-Companies are defined in:
-
-tickers.yaml
-
-Example:
-
-asx:
-  - DRO
-  - AR9
-  - CAT
-  - ABB
-  - TWE
-
-Bob retrieves announcements for each ticker.
-
-Announcement Source
-
-Bob retrieves announcements directly from the ASX announcements feed.
-
-Example endpoint:
-
-https://www.asx.com.au/asx/v2/statistics/announcements.do?asxCode=DRO
-
-Information extracted includes:
-
-announcement title
-
-release date
-
-announcement URL
-
-PDF document link
-
-Only announcements from the last 24 hours are processed.
-
-Announcement Classification
-
-Announcements are automatically categorised:
-
-Category	Description
-RESULTS_HY_FY	Half year or full year results
-ACQUISITION	M&A transactions
-CAPITAL_OR_DEBT_RAISE	Equity issuance or refinancing
-CONTRACT_MATERIAL	Major contracts or strategic updates
-OTHER	Routine filings
-
-Classification uses keyword detection and content signals.
-
-Document Retrieval
-
-For important announcements Bob retrieves the PDF.
-
-Retrieval pipeline:
-
-Step 1 — Direct Download
-
-Using Python requests.
-
-Step 2 — Browser Simulation
-
-If blocked by the ASX consent page:
-
-Playwright
-
-simulates a browser to retrieve the file.
-
-Step 3 — HTML Fallback
-
-If the PDF cannot be retrieved, Bob extracts text from the webpage.
-
-Text Extraction
-
-When a PDF is downloaded:
-
-pypdf
-
-extracts the text.
-
-Bob also checks that the content is meaningful to avoid analysing:
-
-empty documents
-
-ASX legal disclaimer pages
-
-broken downloads
-
-AI Analysis
-
-Bob uses the OpenAI API.
-
-Default model:
-
-gpt-4o-mini
-
-AI analysis is used selectively to control cost.
-
-Deep Analysis Triggers
-
-Detailed AI analysis runs only for major events:
-
-Half-year results
-
-Full-year results
-
-Acquisitions
-
-Capital raises
-
-Debt refinancings
-
-These produce:
-
-• full AI analysis
-• a Strawman-ready investor post
-• saved documents in Google Drive
-
-Quick Summaries
-
-Most announcements receive a short two-line summary:
-
-DRO: $21.7m Western Military Contracts
-So what: Adds to defence pipeline but unlikely to materially move revenue this year.
-Google Drive Storage
-
-Important documents are automatically uploaded to Google Drive.
-
-Stored documents include:
-
-results reports
-
-investor presentations
-
-acquisition documents
-
-capital raise materials
-
-Drive links are included in the email.
-
-Email Alerts
-
-The daily digest contains:
-
-HIGH IMPACT
-
-Major announcements requiring deep analysis.
-
-MATERIAL
-
-Price-sensitive announcements requiring attention.
-
-FYI
-
-Routine announcements included for completeness.
-
-SILENCE
-
-If no announcements occurred:
-
-No announcements in the last 24 hours.
-
-When this happens, Bob now also includes:
-
-- A Joke of the Day
-- A Political Cartoon of the Day link
-Special Routing
-
-Some tickers trigger additional alerts.
-
-Example:
-
-AR9
-
-If AR9 appears in the announcements:
-
-Bob sends a separate email digest to my brother.
-
-Architecture
-
-Core system files:
-
-agent.py
-
-Main orchestration engine.
-
-playwright_fetch.py
-
-Browser automation for retrieving ASX PDFs.
-
-prompts.py
-
-AI prompts used for announcement analysis.
-
-tickers.yaml
-
-Portfolio company list.
-
-shared/ and dashboard/
-
-Plumbing every agent uses (email, Claude transport, ticker identity, ASX
-HTTP, Drive) and the dashboard's per-agent cards. See
-docs/INFRASTRUCTURE.md.
-
-Workflow
-
-Bob runs automatically using GitHub Actions.
-
-Example schedule:
-
-5 1 * * *
-
-Which corresponds to:
-
-09:05 Singapore Time
-
-Bob runs entirely in the GitHub cloud environment.
-
-Your computer does not need to be on.
-
-Required Environment Variables
-
-Configured using GitHub Secrets:
-
-EMAIL_FROM
-EMAIL_TO
-EMAIL_APP_PASSWORD
-OPENAI_API_KEY
-GDRIVE_SERVICE_ACCOUNT_JSON
-GDRIVE_FOLDER_ID
-BROTHER_EMAIL
-Forcing a Re-run for a Specific Ticker
-
-Bob tracks every announcement it has already processed in `state_seen.json`.
-Seen entries expire after 72 hours, but within that window any announcement that was processed in a previous run is skipped — even if you trigger Bob manually on the same day.
-
-To re-process announcements for one or more tickers without clearing the entire state file:
-
-1. Go to the **Actions** tab in GitHub.
-2. Select the **Daily Announcement Digest** workflow.
-3. Click **Run workflow**.
-4. Enter the ticker(s) in the **"Comma-separated ASX tickers to force re-run"** field (e.g. `NHC` or `NHC,BHP`).
-5. Click **Run workflow**.
-
-Bob will bypass the dedup check only for those tickers and re-process any of their announcements that fall within the current `HOURS_BACK` window — all other tickers remain deduplicated as normal.
-
-This can also be triggered by setting the `FORCE_RERUN_TICKERS` environment variable when running locally:
+Examples (from the repository root):
 
 ```bash
-FORCE_RERUN_TICKERS=NHC python agent.py
-```
+# Bob — ASX announcements
+python agent.py
 
-Safety Limits
-
-To prevent runaway API usage:
-
-MAX_PDFS_PER_RUN = 10
-MAX_LLM_CALLS_PER_RUN = 15
-MAX_ANNOUNCEMENTS_PER_TICKER = 12
-Technology Stack
-
-Bob is written in Python.
-
-Key libraries:
-
-requests
-beautifulsoup4
-pypdf
-playwright
-openai
-google-api-python-client
-pyyaml
-Deployment
-
-Bob runs fully in the cloud via:
-
-GitHub Actions
-
-Execution environment:
-
-Python 3.11
-GitHub Hosted Runner
-Future Improvements
-
-Potential upgrades:
-
-LSE announcement monitoring
-
-broker research ingestion
-
-earnings model extraction
-
-insider trading detection
-
-Slack or Telegram alerts
-
-portfolio dashboard visualisation
-
-Why Bob Exists
-
-The ASX produces hundreds of announcements every week.
-
-Most are irrelevant.
-
-Bob's job is to read everything so I don't have to, highlight the important information, and deliver a clean intelligence briefing for my Portfolio.
-
----
-
-## Wally (Watchlist 52-week low agent)
-
-Wally is a second, separate agent that screens multiple watchlists for stocks trading near their 52-week lows.
-
-### What Wally does (V1)
-
-- Loads watchlists from `watchlists/*.yaml`
-- Fetches latest price + 52-week low/high per ticker
-- Flags stocks within 5% of 52-week low:
-  - `distance_to_low_pct = ((current - low_52w) / low_52w) * 100`
-  - flagged (`near_low`) when `distance_to_low_pct <= 5`
-- Also flags stocks at or below a configured per-ticker **target ("buy") price**:
-  - `below_target` when `current <= target_price`
-  - `distance_to_target_pct = ((current - target_price) / target_price) * 100`
-  - a ticker is flagged when `near_low OR below_target`, and below-target
-    tickers get the same treatment as near-low ones (range + value charts, email
-    detail, dashboard row)
-- Creates:
-  - 10-year price-vs-value chart when valuation config exists
-- Sends an HTML email report (with chart attachments)
-- Writes machine-readable JSON output under `outputs/YYYY-MM-DD/`
-
-### Watchlist files
-
-Supported format — a plain string list still works exactly as before:
-
-```yaml
-name: JM Watch List
-tickers:
-  - ARB.AX
-  - QOR.AX
-```
-
-**Target ("buy") prices are optional and fully backwards-compatible.** Any of
-the three forms below may be mixed in one file; plain strings simply carry no
-target:
-
-```yaml
-name: JM Watch List
-tickers:
-  - ARB.AX                 # plain string — no target
-  - ticker: CGS.AX
-    target_price: 1.20     # per-entry mapping
-  - ticker: QOR.AX
-    buy_price: 3.50        # `buy_price` is an accepted alias (used by the TII list)
-
-# ...or a separate top-level block keyed by ticker:
-targets:
-  ARB.AX: 30.00
-  CGS.AX: 1.20
-```
-
-Loader rules: ticker keys are normalised with `.strip().upper()`; prices are
-coerced to `float` and anything `<= 0` or non-numeric is ignored, so a bad
-value never produces a false flag. GBX pence prices may be written the way the
-source spreadsheet holds them (`"500.00p"`, `"9,500.00p"`) — the loader strips
-the thousands comma and trailing `p` to a numeric pence value (compare against a
-pence-quoted quote). When
-`CGS.AX` has `target_price: 1.20`, it is flagged the moment it trades at or
-below 1.20 and appears in the email with **Target** `1.20` and **Trigger**
-`Below target` (or `Near 52w low + Below target` when both apply).
-
-Files used:
-
-- `watchlists/tii_watchlist.yaml`
-- `watchlists/jm_watchlist.yaml`
-- `watchlists/aussie_tech_watchlist.yaml`
-- `watchlists/tii75_watchlist.yaml`
-
-### Valuation config
-
-Place per-ticker config at:
-
-- `valuations/<ticker_lower_with_underscores>.yaml`
-  - e.g. `valuations/bhp_ax.yaml` for `BHP.AX`
-
-Wally uses configured EPS/dividend series to plot value lines. If missing, the report states: `No valuation config found yet for this ticker`.
-
-### Scheduling
-
-Workflow: `.github/workflows/wally_watchlists.yml`
-
-- Tue + Fri: standard watchlists (`tii`, `jm`, `aussie_tech`)
-- Fri only: `tii75` is attempted, then Python applies fortnightly gate
-  - gate logic in `wally.config.should_run_tii75`
-  - adjustable via env `TII75_ANCHOR_ISO_WEEK`
-
-### Combined email mode
-
-As of the latest update, Wally supports combined email mode to consolidate all watchlist results into a single email:
-
-```bash
-# Run all watchlists (standard + TII75) with combined email
+# Wally — run all configured watchlists in combined mode
 python -m wally.main --all-combined
 
-# Run standard watchlists only with combined email
-python -m wally.main --all-standard-watchlists --combined-email
+# Harry — run a named holding review
+python -m hindsight sell NHC
 
-# Force TII75 inclusion even if gated
-python -m wally.main --all-combined --force
+# Inspect the available Theo commands
+python -m theo.cli --help
 ```
 
-The GitHub Actions workflow now uses combined email mode by default. See `docs/WALLY_AND_MASTER_ENGINE_CHANGES.md` for details.
+These are examples, not a guarantee that every optional service or secret is configured on a local machine. Use each agent's own README and workflow for its current flags, environment requirements and dry-run options.
 
-### Required secrets / env
+## Documentation maintenance
 
-Wally reuses Bob email settings where possible:
-
-- `EMAIL_FROM` (or `EMAIL_USER`)
-- `EMAIL_TO`
-- `EMAIL_APP_PASSWORD` (or `SMTP_PASS`)
-- optional SMTP overrides: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`
-
-### Local run commands
-
-```bash
-python -m wally.main --watchlist watchlists/jm_watchlist.yaml
-python -m wally.main --all-standard-watchlists
-python -m wally.main --watchlist watchlists/tii75_watchlist.yaml --force
-python -m wally.main --tii75 --force
-```
-
-
-## Sunday Sally (Weekly Valuation Review)
-
-A new weekly agent is available under `sunday-sally/` to review names near 52-week highs and assess valuation stretch vs history.
-See `sunday-sally/README.md` and `.github/workflows/sunday_sally_weekly_review.yml`.
-
-## Harry Hindsight (Chief Sceptic)
-
-Harry Hindsight sits above the other agents and asks whether we're wrong, while it's still foresight. It reads Bob, Sally, Wally and Theo's existing outputs, gates in code, and only calls the model when something could change the answer: a Sally sell signal on a holding, a Bob high-impact event, a JM Watch List name that moved, one of Wally's top ideas, a monthly portfolio review, or an autopsy of its own past warnings. Every report runs a thesis test, Helmer's 7 Powers, a Munger tendencies scan with a code-enforced Lollapalooza gate, and, for sells, the fresh capital and forced sale tests.
-
-Personal data (case files, SQLite, the bias profile) lives in a private repo, never here. Run `python -m hindsight sell NHC` for a one-off sell review. See `hindsight/README.md`, `docs/CAPTAIN_HINDSIGHT_ARCHITECTURE.md` and `.github/workflows/captain_hindsight.yml`.
-
-## Master Engine (not currently run)
-
-`master_engine/` can aggregate events from Bob, Wally, Ned and Harry into
-one prioritised briefing, but no workflow runs it. The
-`master_engine_alert.yml` workflow and `run_master_investor.py` it used to
-describe are no longer in the repo. The event model it defines,
-`InvestorEvent`, now lives in `shared/events.py` and is written by Harry on
-every run. See `master_engine/README.md`.
+When an agent's data source, prompt contract, workflow trigger, model/tool integration or output changes, update its page in [`bot-guide/`](bot-guide/README.md) and the [workflow matrix](bot-guide/workflow-matrix.md) in the same change. Mark uncertain or inferred behaviour rather than presenting it as a verified code fact.

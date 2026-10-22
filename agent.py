@@ -260,11 +260,12 @@ QUARTERLY_4C_CASHFLOW_ROWS: List[Tuple[str, str]] = [
 # acquisitions (2026-10-16) were the two-deals-in-one-morning case that made
 # the old free-text wall of prose unreadable in the email.
 ACQUISITION_QUICK_TAKE_ROWS: List[Tuple[str, str]] = [
-    ("target",        "Target"),
-    ("consideration",  "Consideration"),
-    ("multiple",       "Multiple"),
-    ("funding",        "Funding"),
-    ("strategic_fit",  "Strategic fit"),
+    ("target",             "Target"),
+    ("consideration",      "Consideration"),
+    ("multiple",           "Multiple"),
+    ("funding",            "Funding"),
+    ("capital_raise_check","Capital raise check"),
+    ("strategic_fit",      "Strategic fit"),
 ]
 
 _JOKES_FILE = Path(__file__).resolve().parent / "config" / "daily_jokes.txt"
@@ -388,9 +389,11 @@ def is_price_sensitive_title(title: str) -> bool:
         "trading update", "guidance", "earnings", "profit", "revenue", "eps",
         "ebit", "ebitda", "investor presentation", "presentation",
         "placement", "rights issue", "entitlement", "spp", "capital raising",
-        "issue of shares", "convertible", "notes", "bond", "debt facility",
+        "issue of shares", "issue of securities", "issue of new shares",
+        "convertible", "notes", "bond", "debt facility",
         "refinance", "term loan", "facility",
         "acquisition", "acquire", "merger", "scheme", "takeover", "transaction",
+        "combin",
         "contract", "award", "termination", "litigation", "regulatory",
         "material", "strategic", "halt", "suspension",
         "ceo", "cfo", "resignation", "retirement",
@@ -567,10 +570,27 @@ def classify_from_title_only(title: str) -> str:
         return "RESULTS_HY_FY"
     if looks_like_remuneration_title(title):
         return "REMUNERATION"
-    if any(k in t for k in ["acquisition", "acquire", "merger", "scheme", "takeover", "transaction"]):
+    # "Combine"/"combination" is business-combination language for the same
+    # forensic job as an acquisition, whatever the press-release framing
+    # (merger of equals vs one company buying another) — NHC's "New Hope and
+    # Malabar to combine" (2026-10-18) matched none of "acquisition" /
+    # "acquire" / "merger" / "scheme" / "takeover" / "transaction" and fell
+    # straight through to FYI with no analysis at all.
+    if any(k in t for k in [
+        "acquisition", "acquire", "merger", "scheme", "takeover", "transaction", "combin",
+    ]):
         return "ACQUISITION"
+    # "Issue of securities" / "issue of new shares" is the generic ASX term
+    # for a share issuance — not just "placement" or "entitlement" — and is
+    # exactly the notice type that accompanies a scrip-funded acquisition or
+    # combination (NHC's "Proposed issue of securities - NHC" was the
+    # mechanism for the deal's ~$1.3bn of consideration shares). Bundled into
+    # the acquisition analysis when it shares a filing date with an
+    # ACQUISITION-classified release (see likely_acquisition_bundle_items);
+    # classified here as its own capital-raise card when it isn't.
     if any(k in t for k in [
         "placement", "spp", "entitlement", "rights issue", "capital raising",
+        "issue of securities", "issue of shares", "issue of new shares",
         "convertible", "notes", "debt facility", "refinance", "term loan", "bond",
     ]):
         return "CAPITAL_OR_DEBT_RAISE"
@@ -3561,13 +3581,33 @@ def create_analysis_doc(
 
 def deep_acquisition_memo(
     ticker: str, title: str, text: str, counters: Dict, pdf_path: Optional[Path] = None,
+    pdf_attachments: Optional[List[PdfAttachment]] = None,
 ) -> dict:
     """One structured LLM call for an acquisition announcement. Same shape as
     deep_capital_memo: streaming (large enough to trip the SDK's non-
     streaming ceiling), _status-tagged return dict, raw text preserved on a
     parse failure so a half-broken digest never renders clean.
+
+    *pdf_attachments* — when a deal spans several related documents (the
+    primary release, an investor presentation, a consideration
+    share-issuance notice — see likely_acquisition_bundle_items), pass all
+    of them here as native PDF document blocks, same pattern as
+    deep_results_analysis's report+deck. Takes priority over the single
+    *pdf_path* path below, which stays for the common single-document case.
     """
-    if pdf_path and pdf_path.exists():
+    if pdf_attachments:
+        user = (
+            f"Ticker: {ticker}\nTitle: {title}\n\n"
+            "Please analyse the attached documents together as one deal "
+            "(the primary release plus any investor presentation and/or "
+            "consideration share-issuance notice). Use only figures they "
+            "actually disclose."
+        )
+        out = llm_chat_with_pdfs(
+            ACQUISITION_PROMPT, user, counters, pdf_attachments,
+            max_tokens=ACQUISITION_MAX_TOKENS,
+        )
+    elif pdf_path and pdf_path.exists():
         user = (
             f"Ticker: {ticker}\nTitle: {title}\n\n"
             "Please analyse the attached acquisition announcement as the primary "
@@ -4120,6 +4160,63 @@ def likely_results_bundle_items(items_for_ticker: List[Dict]) -> List[Dict]:
     return [it for it in items_for_ticker if looks_like_results_title(it["title"])]
 
 
+# Side documents that belong to the SAME acquisition/combination release as
+# an ACQUISITION-classified trigger item, filed the same day — an investor
+# presentation, a scheme booklet, or the consideration share-issuance notice
+# (NHC's real case: "New Hope and Malabar to combine" + "Presentation on New
+# Hope and Malabar to Combine" + "Proposed issue of securities - NHC", all
+# lodged 2026-10-18). None of these titles are themselves ACQUISITION-
+# classified, so without this they'd either fragment into a separate,
+# context-free CAPITAL_OR_DEBT_RAISE card or fall into the generic
+# price-sensitive/FYI path.
+_ACQUISITION_BUNDLE_SIDE_PATTERNS = tuple(re.compile(p) for p in (
+    r"\bpresentation\b",
+    r"\binvestor\s+(?:call|briefing|update)\b",
+    r"\bscheme\s+booklet\b",
+    r"\bissue\s+of\s+(?:securities|shares|new\s+shares)\b",
+    r"\bproposed\s+issue\b",
+    r"\bplacement\b",
+    r"\bentitlement\b",
+))
+
+
+def likely_acquisition_bundle_items(items_for_ticker: List[Dict]) -> List[Dict]:
+    """Group one ticker's acquisition/combination release with its same-day
+    side documents, so deep_acquisition_memo sees the whole deal in one call
+    instead of fragmenting it into separate, context-free cards. Mirrors
+    likely_results_bundle_items' role for the RESULTS_HY_FY path.
+
+    Deliberately requires exactly ONE ACQUISITION-classified trigger item:
+    zero means nothing to bundle, and more than one (AHC announced two
+    distinct, unrelated acquisitions the same morning on 2026-10-16) means
+    bundling would blur two different deals into one card, so each is left
+    to the per-item loop exactly as it was before this function existed.
+    """
+    # A title that itself reads as a side document (an investor presentation
+    # "on" the combination, say) can independently match the ACQUISITION
+    # keywords too -- "Presentation on New Hope and Malabar to Combine" is
+    # exactly this case. Exclude anything matching a side pattern from the
+    # trigger count so it is never mistaken for a second, separate deal.
+    triggers = [
+        it for it in items_for_ticker
+        if classify_from_title_only(it["title"]) == "ACQUISITION"
+        and not any(p.search(it["title"].lower()) for p in _ACQUISITION_BUNDLE_SIDE_PATTERNS)
+    ]
+    if len(triggers) != 1:
+        return []
+    trigger = triggers[0]
+    trigger_date = trigger.get("date")
+    bundle = [trigger]
+    seen_urls = {trigger["url"]}
+    for it in items_for_ticker:
+        if it["url"] in seen_urls or it.get("date") != trigger_date:
+            continue
+        if any(p.search(it["title"].lower()) for p in _ACQUISITION_BUNDLE_SIDE_PATTERNS):
+            bundle.append(it)
+            seen_urls.add(it["url"])
+    return bundle
+
+
 def _item_date(it: Dict) -> dt.date:
     """Parse an announcement item's dd/mm/yyyy date; dt.date.min if unparseable
     so undated items sort oldest and never win 'most recent'."""
@@ -4201,6 +4298,35 @@ def _already_sent_today() -> bool:
     return str(data.get("last_run") or "") == today_sgt_date().isoformat()
 
 
+def _bob_item_key(item: dict) -> str:
+    return str(item.get("url") or "") or f"{item.get('ticker', '')}|{item.get('title', '')}"
+
+
+def _merge_bob_tiers(prev: dict, new: Dict[str, List[dict]]) -> Dict[str, List[dict]]:
+    """Today's earlier dashboard items plus this run's, one copy of each.
+
+    Each announcement appears once, in the highest tier either run gave it;
+    within a tier this run's copy wins (a rerun may have re-analysed it). This
+    run's items come first, then the earlier ones it didn't repeat.
+    """
+    order = ("high_impact", "material", "fyi")
+    seen: set = set()
+    merged: Dict[str, List[dict]] = {}
+    for tier in order:
+        newer = [i for i in new.get(tier) or [] if isinstance(i, dict)]
+        earlier = [i for i in prev.get(tier) or [] if isinstance(i, dict)]
+        newer_keys = {_bob_item_key(i) for i in newer}
+        out: List[dict] = []
+        for item in newer + [i for i in earlier if _bob_item_key(i) not in newer_keys]:
+            k = _bob_item_key(item)
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(item)
+        merged[tier] = out
+    return merged
+
+
 def _emit_bob_dashboard_json(
     high_impact: List[dict],
     material: List[dict],
@@ -4209,12 +4335,22 @@ def _emit_bob_dashboard_json(
 ) -> None:
     out_path = BOB_DASHBOARD_JSON
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    today = today_sgt_date().isoformat()
+    tiers = {"high_impact": high_impact, "material": material, "fyi": fyi}
+    # A second run on the same SGT day adds to the dashboard instead of
+    # replacing it. Without this a rerun that finds nothing new (its items are
+    # already in seen_state) wiped the morning's real digest down to "silence"
+    # (MSV, 2026-10-19). A new day starts clean.
+    try:
+        prev = json.loads(out_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        prev = {}
+    if isinstance(prev, dict) and str(prev.get("last_run") or "") == today:
+        tiers = _merge_bob_tiers(prev, tiers)
     data = {
-        "last_run": today_sgt_date().isoformat(),
-        "silence": silence,
-        "high_impact": high_impact,
-        "material": material,
-        "fyi": fyi,
+        "last_run": today,
+        "silence": silence and not any(tiers.values()),
+        **tiers,
     }
     out_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     log(f"[bob] Dashboard JSON written → {out_path}")
@@ -4407,6 +4543,7 @@ def main():
             by_ticker[t] = []
 
     processed_results: set = set()
+    processed_acquisitions: set = set()
 
     with tempfile.TemporaryDirectory() as tmpdir_str:
         tmpdir = Path(tmpdir_str)
@@ -4562,6 +4699,70 @@ def main():
                     })
                     if ticker == "AR9":
                         brother_blocks.append(block)
+
+            # ACQUISITION / business-combination bundle: the primary release
+            # plus any same-day investor presentation and consideration
+            # share-issuance notice, analysed together as one deal. See
+            # likely_acquisition_bundle_items for why this only fires with
+            # exactly one trigger item (NHC's "New Hope and Malabar to
+            # combine", 2026-10-18 — two more documents for the same deal
+            # bundled in; AHC's two distinct same-morning acquisitions,
+            # 2026-10-16, deliberately do NOT bundle and fall through to the
+            # per-item loop below exactly as before).
+            acquisition_bundle = likely_acquisition_bundle_items(fresh_items)
+            if acquisition_bundle and ticker not in processed_acquisitions:
+                processed_acquisitions.add(ticker)
+                pdf_attachments: List[PdfAttachment] = []
+                bundle_fallback_text = ""
+                primary_url = acquisition_bundle[0]["url"]
+                for b in acquisition_bundle:
+                    b_title = b["title"]
+                    b_url = b["url"]
+                    handled_urls.add(b_url)
+                    pdf_url = asx_pdf_url_from_item_url(b_url)
+                    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", f"{ticker}_{b_title[:80]}")
+                    b_pdf_path = tmpdir / f"{safe_name}.pdf"
+                    b_text, got_pdf = fetch_announcement_text(session, b_url, pdf_url, b_pdf_path, counters)
+                    if not bundle_fallback_text and b_text:
+                        bundle_fallback_text = b_text
+                    if got_pdf:
+                        try:
+                            pdf_attachments.append(PdfAttachment(
+                                name=b_title, pdf_bytes=b_pdf_path.read_bytes(), fallback_text=b_text,
+                            ))
+                        except Exception as e:
+                            log(f"Could not read bundled acquisition PDF {b_pdf_path}: {e}")
+                    if b_pdf_path.exists():
+                        try:
+                            b_pdf_path.unlink()
+                        except Exception:
+                            pass
+
+                analysis = deep_acquisition_memo(
+                    ticker, acquisition_bundle[0]["title"], bundle_fallback_text, counters,
+                    pdf_attachments=pdf_attachments or None,
+                )
+
+                analysis_pdf_path = None
+                try:
+                    analysis_pdf_path = generate_analysis_pdf(
+                        ticker, "acquisition", build_acquisition_doc_html(ticker, analysis, primary_url),
+                    )
+                except Exception as e:
+                    log(f"ERROR: acquisition PDF generation failed for {ticker}: {type(e).__name__}: {e}")
+
+                block = build_acquisition_block(
+                    ticker, analysis, primary_url,
+                    announced=(acquisition_bundle[0].get("date", "") if show_date else ""),
+                )
+                high_impact_blocks.append(block)
+                high_impact_items.append({
+                    "ticker": ticker, "title": acquisition_bundle[0]["title"][:200], "url": primary_url,
+                    "type": "acquisition", "analysis": analysis,
+                    "pdf_path": str(analysis_pdf_path) if analysis_pdf_path else None,
+                })
+                if ticker == "AR9":
+                    brother_blocks.append(block)
 
             # Per-item MATERIAL / HIGH IMPACT
             for it in fresh_items:

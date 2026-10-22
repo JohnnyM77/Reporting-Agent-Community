@@ -266,3 +266,178 @@ final_test:
     A record clear enough that, years later, JM can tell apart:
     good decision / good outcome, good decision / bad outcome,
     bad decision / good outcome, and bad decision / bad outcome.
+
+# =============================================================================
+# Mode 2 — the hold-through-sell review.
+# Another agent (Sally, Harry, or Theo's own drift) has said SELL / TRIM /
+# REVIEW. You are not going to. That decision is the single most valuable thing
+# in the whole system and the one that otherwise never gets written down: a
+# year later it is remembered as conviction, not as "I waved off a valuation
+# flag three times running". So get the reason on the record now — declining is
+# a fine answer, but it has to be an argued one, and it produces a dated review
+# in the thesis file (trigger set, decision DECLINED/PARTIAL/ACTED).
+# =============================================================================
+hold_review:
+  when: >-
+    A signal is open against a holding: Sally says trim or flags it for review,
+    Harry reads the thesis as broken, or Theo's own drift has gone to WATCH or
+    DRIFTING. The holding is one you intend to keep (or let run).
+  posture: >-
+    Steelman the sell case first — out loud, in the agent's own words — before
+    hearing the hold case. The job is not to talk JM out of holding; it is to
+    make sure the reason to hold is a reason, not an attachment, and that it is
+    falsifiable. Short: three or four questions, not the full entry interview.
+  core_principle: >-
+    A falling price is not a thesis break, and "I still like it" is not a
+    reason. Either the pillars the agent attacked are intact for a statable,
+    evidenced reason, or a kill condition has to tighten, or the position
+    should move. There is no fourth option that is just holding.
+
+  # Pick the scenario that fits the signal; each ends in the same place — a
+  # dated review with a decision, and, where the decision is DECLINED, either a
+  # tightened kill condition or an explicit "still no trigger, and here is why".
+  scenarios:
+    - id: valuation_flag
+      fires_on: "Sally: trim / price above SELL / near 52-week high"
+      the_question: >-
+        Sally says the price has run past value. Are you letting a winner run,
+        or anchoring to a number you no longer believe? What would the price,
+        the multiple, or the growth rate have to do for you to actually trim —
+        and is that written as a kill condition, or only in your head?
+      watch_for: >-
+        "Quality compounder, never sell" used to avoid naming any sell level at
+        all. A hold can be right; a hold with no stated trim trigger after a big
+        re-rating is complacency wearing conviction's clothes.
+      capture: [decision, trim_trigger_or_why_none, hold_thesis_update]
+
+    - id: letting_winners_run
+      fires_on: "a large gain, price well above the original SELL multiple"
+      the_question: >-
+        The original sell discipline said this was dear a while ago and it kept
+        going. Is the business genuinely worth more than you thought (re-rate
+        the SELL multiple, and say why), or are you running it on momentum and
+        hoping? Name the new level, or name the trailing rule that gets you out.
+      watch_for: >-
+        Silently abandoning the sell discipline is the most expensive habit
+        there is. Either the valuation framework changes on the record, with a
+        reason, or the old one still binds.
+      capture: [decision, revised_sell_level_or_trailing_rule, hold_thesis_update]
+
+    - id: thesis_broken
+      fires_on: "Harry: thesis broken / a pillar BREACHED"
+      the_question: >-
+        Harry (or the drift engine) reads a pillar as broken. Which pillar do
+        you still believe, exactly what evidence says so, and what — precisely —
+        would make you agree it has broken and sell? If you cannot name that,
+        the pillar is already gone and you are holding on hope.
+      watch_for: >-
+        Re-interpreting the kill condition so the breach no longer counts. If
+        the kill fired, it fired; loosening it after the fact is the thing the
+        whole file exists to catch.
+      capture: [decision, pillar_status_update, kill_condition_change]
+
+    - id: repeat_refusal
+      fires_on: "the same signal declined three times with nothing tightened"
+      the_question: >-
+        This is the third time you have waved this away without writing down
+        what would change your mind. At this point the position is being
+        defended, not held. Either tighten a kill condition now so the signal
+        can eventually win, or state plainly that you will hold regardless of
+        price — and own that that is what you are doing.
+      watch_for: "A fourth 'holding' with no amendment. That is the alert."
+      capture: [decision, kill_condition_change_required]
+
+  produces:
+    kind: review_entry
+    note: >-
+      The output is a dated entry for the thesis file's reviews: block — the
+      trigger that fired, the decision (ACTED / PARTIAL / DECLINED), a one-line
+      verdict, any pillar-status change, and any amendment (TIGHTENED is the
+      honest one; LOOSENED on a hold-through-sell is a flag). It may also update
+      hold_thesis. It does not rewrite the entry thesis.
+
+# =============================================================================
+# Mode 3 — the annual refresh.
+# Once a year, after the company reports its full-year result, re-test the
+# thesis against the new numbers. Prompted, never mandatory. Fires per company
+# on its own reporting cycle (see reporting_calendar below), either when Bob
+# picks the result up or when the calendar says the result is out and no
+# refresh has been written since.
+# =============================================================================
+annual_refresh:
+  when: >-
+    A full-year result has landed for a holding and the thesis has not been
+    reviewed since. One pass a year per company; declining is fine, but the
+    schedule is on the record.
+  posture: >-
+    Bring the entry thesis and the last review to the table. Go pillar by
+    pillar against the numbers that just printed. This is not a fresh entry
+    interview — it is "did the year support or undermine each load-bearing
+    claim, and does the hold thesis still hold".
+  core_principle: >-
+    Judge the year against what each pillar predicted, using what was knowable
+    when the thesis was written — not with the benefit of the result you now
+    hold in your hand. The refresh updates the thesis; it never rewrites the
+    original bet to match how the year went.
+
+  questions:
+    - id: AR1
+      ask: >-
+        Pillar by pillar: did this result support it, strain it, or break it?
+        Quote the number that decides each one.
+      capture: "pillar_status for every pillar, with the figure behind it."
+    - id: AR2
+      ask: >-
+        Did anything in the result surprise you — something your thesis did not
+        see coming, in either direction? If nothing did, say so plainly.
+      capture: "new information, labelled as such so a later review can tell it apart."
+    - id: AR3
+      ask: >-
+        Is the reason you hold this today still the reason you wrote down? If it
+        has changed, is that a thesis that matured or one rewritten after the
+        fact to justify not selling?
+      capture: "hold_thesis, refreshed or confirmed."
+    - id: AR4
+      ask: >-
+        Given this result, is the valuation still one you would buy at? If not,
+        is it a trim, or a hold-but-stop-adding?
+      capture: "valuation_note and, if it moved, a trim trigger."
+    - id: AR5
+      ask: >-
+        Does any kill condition need to change now you have a year more data —
+        tightened to a real number, or admitted as untestable?
+      capture: "amendments, with direction. TIGHTENED is the healthy one."
+    - id: AR6
+      ask: >-
+        The moat, on the fingerprint numbers (see theo_business_quality.yaml):
+        did the advantage widen or narrow this year? Margin, returns on capital,
+        pricing, share, churn — which way did they move, and did the erosion test
+        in any pillar get closer to firing?
+      capture: "a one-line moat-direction read, feeding the relevant pillar status."
+
+  produces:
+    kind: review_entry
+    note: >-
+      A dated review with trigger: ANNUAL_REPORT, the per-pillar status against
+      the result, a refreshed hold_thesis, and any amendments. Keeps the entry
+      thesis untouched — the refresh is the next dated layer, not a rewrite.
+
+# -----------------------------------------------------------------------------
+# Reporting calendar — so the annual refresh knows each company's cycle.
+# -----------------------------------------------------------------------------
+reporting_calendar:
+  why: >-
+    Reporting dates are per company. Most ASX names balance on 30 June and
+    report their full-year result in August; a calendar-year reporter balances
+    on 31 December and reports in February. The refresh is keyed to the right
+    month so it neither nags early nor sleeps through the result.
+  thesis_field: >-
+    reporting_calendar.fy_end_month in the thesis frontmatter — 6 for an
+    Australian financial year, 12 for a calendar year. When it is missing, June
+    is assumed and the schedule says "assumed" rather than pretending to know.
+  how_it_fires: >-
+    Two ways, and either is enough. Bob reading a full-year result onto the
+    dashboard opens the refresh as a question the day it lands. Independently,
+    the schedule marks a thesis due once the result is expected (about two
+    months after the balance date) and no review has been written since — so
+    the prompt survives even after Bob's digest has rolled on.

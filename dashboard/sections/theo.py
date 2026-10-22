@@ -32,6 +32,94 @@ def _theo_link(ticker: str, label: str | None = None) -> str:
     )
 
 
+_TRIGGER_LABEL = {
+    "SALLY_TRIM": "Sally: trim",
+    "SALLY_REVIEW": "Sally: review",
+    "HARRY_BROKEN": "Harry: thesis broken",
+    "ANNUAL_REPORT": "Annual refresh",
+    "ANNUAL": "Annual refresh",
+    "ANNUAL_REFRESH": "Annual refresh",
+}
+_DECISION_COLOUR = {
+    "ACTED": "#22c55e", "PARTIAL": "#3b82f6", "DECLINED": "#f59e0b", "RECORDED": "#64748b",
+}
+
+
+def _maintenance_html(data: dict) -> str:
+    """The upkeep half of the card: the annual-refresh schedule and the
+    record of why a holding was kept when an agent said sell.
+
+    Structural facts only — ticker, date, trigger, decision, reporting basis.
+    The reasoning lives on the slide; nothing here can size the book."""
+    m = data.get("maintenance") or {}
+    annual = m.get("annual_reviews") or []
+    holds = m.get("hold_decisions") or []
+    if not annual and not holds:
+        return ""
+
+    due = [a for a in annual if a.get("due")]
+    annual_html = ""
+    if annual:
+        due_rows = ""
+        for a in due:
+            last = _esc(a.get("last_review") or "never reviewed")
+            due_rows += (
+                "<div style='display:flex;justify-content:space-between;gap:8px;"
+                "padding:6px 10px;margin-top:6px;background:#0f172a;border-left:3px solid #f59e0b'>"
+                f"<span><strong>{_theo_link(a.get('ticker',''))}</strong>"
+                f"<span style='color:#64748b;font-size:11px'> &middot; {_esc(a.get('basis',''))}</span></span>"
+                f"<span style='color:#fbbf24;font-size:11px'>refresh due &middot; result ~{_esc(a.get('cycle_report_date',''))} &middot; last {last}</span>"
+                "</div>"
+            )
+        on_track = [a for a in annual if not a.get("due")]
+        schedule = " &nbsp; ".join(
+            f"<span style='color:#94a3b8'>{_esc(a.get('ticker',''))}</span>"
+            f"<span style='color:#475569;font-size:10px'> {_esc(a.get('basis','').split(',')[0])}</span>"
+            for a in on_track
+        )
+        count_line = (
+            f"<span style='color:#f59e0b;font-weight:700'>{len(due)} due</span>"
+            if due else "<span style='color:#22c55e'>all on schedule</span>"
+        )
+        annual_html = (
+            "<div style='margin-top:14px'>"
+            "<div style='color:#94a3b8;font-size:11px;font-weight:700;letter-spacing:0.08em;"
+            f"text-transform:uppercase'>Annual refresh &middot; {count_line}</div>"
+            f"{due_rows}"
+            + (f"<div style='color:#64748b;font-size:11px;margin-top:8px'>On schedule: {schedule}</div>"
+               if schedule else "")
+            + "</div>"
+        )
+
+    holds_html = ""
+    if holds:
+        rows = ""
+        for h in holds[:12]:
+            dec = _esc(h.get("decision", ""))
+            trig = _TRIGGER_LABEL.get(h.get("trigger", ""), _esc(h.get("trigger", "")))
+            rows += (
+                "<tr>"
+                f"<td><strong>{_theo_link(h.get('ticker',''))}</strong></td>"
+                f"<td style='color:#94a3b8;font-size:12px'>{_esc(h.get('date',''))}</td>"
+                f"<td style='color:#cbd5e1;font-size:12px'>{trig}</td>"
+                f"<td><span style='color:{_DECISION_COLOUR.get(h.get('decision',''),'#64748b')};"
+                f"font-size:11px;font-weight:700'>{dec}</span></td>"
+                "</tr>"
+            )
+        holds_html = (
+            "<div style='margin-top:16px'>"
+            "<div style='color:#94a3b8;font-size:11px;font-weight:700;letter-spacing:0.08em;"
+            "text-transform:uppercase'>Held when told to sell &middot; on the record</div>"
+            "<table style='width:100%;border-collapse:collapse;font-size:13px;margin-top:6px'>"
+            "<tr style='color:#64748b;font-size:11px'><th style='text-align:left'>Ticker</th>"
+            "<th style='text-align:left'>Date</th><th style='text-align:left'>Trigger</th>"
+            "<th style='text-align:left'>Call</th></tr>"
+            f"{rows}</table></div>"
+        )
+
+    return annual_html + holds_html
+
+
 def _theo_section(data: dict) -> str:
     """Theo on the dashboard is a glance, not the analysis.
 
@@ -154,5 +242,6 @@ def _theo_section(data: dict) -> str:
       </div>
       {questions_html}
       {table}
+      {_maintenance_html(data)}
       {gaps_html}
     </div>"""

@@ -1,0 +1,31 @@
+# Mike: Stock Quality Assessment Framework v3.1 (Mikebrisy, Strawman), settings.
+#
+# Mike scores the framework exactly as written. What can be tuned here is
+# limited to what the framework itself leaves to the assessor:
+#   * WACC for the Returns on Capital comparison (section 4.5);
+#   * manual overlays (section 4 "Permitted overlay"), each one +/-0.5 at most,
+#     with its evidence and source, shown in the report as a manual overlay;
+#   * the ticker lists the workflow can run.
+# Anything that changes the rubric itself belongs in a separate profile, not
+# here (see the "How JM might change Mike" doc).
+
+wacc:
+  default: 0.09          # AUD equity-heavy default; a stated assumption, shown in every report
+  by_ticker: {}          # e.g. {BHP: 0.10, DRO: 0.12}
+
+# Manual overlays, applied after the data and evidence-review overlays and
+# still capped at +/-0.5 per criterion in total.
+#   TICKER:
+#     - criterion: quality            # stability | quality | market | growth
+#       adjustment: -0.5
+#       reason: "Recurring 'one-offs'"
+#       evidence: "Restructuring charges in FY22, FY23, FY24 and FY25"
+#       source: "FY25 annual report, note 5"
+manual_overlays: {}
+
+lists:
+  # Mikebrisy's sample (Strawman post, 2026-10-20), read from a low-resolution
+  # screenshot. One row (between EYE and CAT) could not be read and is left out.
+  mikebrisy_sample: [BOT, EYE, CAT, TLX, SDR, MVP, ARX, CGS, NEU, EOL, LNW, SPZ, XRF, RMD, NWL, TNE, PME]
+  # "portfolio" is built at run time from data/decisions.json (open decisions),
+  # ETFs excluded, so it never goes stale.

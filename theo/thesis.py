@@ -133,6 +133,53 @@ def word_count(text: str) -> int:
     return len([w for w in re.split(r"\s+", text.strip()) if w])
 
 
+# Words a person might reasonably write for a reporting basis, mapped to the
+# month the financial year ends. Australian listed companies overwhelmingly
+# balance on 30 June; a minority (and most offshore names) report on the
+# calendar year.
+_BASIS_MONTHS = {
+    "australian_fy": 6, "australian": 6, "au_fy": 6, "fy": 6, "june": 6, "jun": 6,
+    "calendar": 12, "calendar_year": 12, "cy": 12, "december": 12, "dec": 12,
+}
+_MONTH_NAMES = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def _reporting_calendar(raw: Any) -> tuple[int | None, str]:
+    """Parse the optional ``reporting_calendar`` block into (fy_end_month, basis).
+
+    Accepts a few shapes so the thesis file can be written the obvious way:
+    ``reporting_calendar: australian_fy`` / ``calendar``; or a mapping with
+    ``fy_end_month: 6``, ``basis: calendar`` or ``month: June``. Returns
+    ``(None, "")`` when nothing usable is given — the caller then assumes June
+    and flags the assumption.
+    """
+    if raw is None or raw == "":
+        return None, ""
+    if isinstance(raw, str):
+        key = raw.strip().lower()
+        if key in _BASIS_MONTHS:
+            return _BASIS_MONTHS[key], key
+        return None, ""
+    d = _as_dict(raw)
+    basis = _text(d.get("basis")).lower()
+    month: int | None = None
+    raw_month = d.get("fy_end_month", d.get("month"))
+    if isinstance(raw_month, (int, float)):
+        m = int(raw_month)
+        if 1 <= m <= 12:
+            month = m
+    elif isinstance(raw_month, str):
+        mk = raw_month.strip().lower()[:3]
+        if mk in _MONTH_NAMES:
+            month = _MONTH_NAMES[mk]
+    if month is None and basis in _BASIS_MONTHS:
+        month = _BASIS_MONTHS[basis]
+    return month, basis
+
+
 # --------------------------------------------------------------------------
 # Schema
 # --------------------------------------------------------------------------
@@ -317,6 +364,12 @@ class Thesis:
     conviction: str = ""
     horizon: str = ""
     origin: str = "OWN"
+    # When this company's full-year result lands, so the annual refresh knows
+    # the cycle: 6 = June (Australian FY), 12 = December (calendar year).
+    # None means never stated — the annual-review schedule then assumes June
+    # (the ASX norm) and says so rather than pretending to know.
+    reporting_fy_end_month: int | None = None
+    reporting_basis: str = ""
     draft: bool = False
     sources: list[Source] = dataclasses.field(default_factory=list)
     the_bet: str = ""
@@ -362,6 +415,16 @@ class Thesis:
     @property
     def borrowed(self) -> bool:
         return self.origin in ("BORROWED", "HYBRID")
+
+    @property
+    def fy_end_month(self) -> int:
+        """The month the financial year ends. Defaults to June when unstated."""
+        return self.reporting_fy_end_month or 6
+
+    @property
+    def reporting_calendar_assumed(self) -> bool:
+        """True when no reporting calendar was stated and June is being assumed."""
+        return self.reporting_fy_end_month is None
 
     @property
     def diverged_sources(self) -> list[Source]:
@@ -441,6 +504,8 @@ def from_dict(data: dict[str, Any], body: str = "", path: Path | None = None) ->
         conviction=_upper(data.get("conviction")),
         horizon=_text(data.get("horizon")),
         origin=_upper(data.get("origin")) or "OWN",
+        reporting_fy_end_month=_reporting_calendar(data.get("reporting_calendar"))[0],
+        reporting_basis=_reporting_calendar(data.get("reporting_calendar"))[1],
         draft=bool(data.get("draft", False)),
         sources=[Source.from_raw(s) for s in _as_list(data.get("sources"))],
         the_bet=_text(data.get("the_bet")),
@@ -565,6 +630,13 @@ def validate(thesis: Thesis) -> list[str]:
         bad(f"evidence_grade '{thesis.evidence_grade}' not one of A, B, C")
     if thesis.origin not in ORIGINS:
         bad(f"origin '{thesis.origin}' not one of {', '.join(ORIGINS)}")
+    if thesis.reporting_fy_end_month is not None and not (
+        1 <= thesis.reporting_fy_end_month <= 12
+    ):
+        bad(
+            f"reporting_calendar fy_end_month '{thesis.reporting_fy_end_month}' "
+            "is not a month 1-12"
+        )
 
     seen_ids: set[str] = set()
     for pillar in thesis.pillars:
@@ -624,6 +696,10 @@ evidence_grade: {grade}         # A contemporaneous | B reconstructed with docum
 conviction: {conviction}
 horizon: {horizon}
 origin: {origin}                # OWN | BORROWED | HYBRID
+
+reporting_calendar:             # when the full-year result lands, so the annual refresh knows your cycle
+  fy_end_month: 6               # 6 = June (Australian FY) | 12 = December (calendar year)
+
 draft: true
 
 sources: []

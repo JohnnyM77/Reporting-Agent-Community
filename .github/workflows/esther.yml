@@ -47,9 +47,9 @@ jobs:
     env:
       HAS_PRIVATE_TOKEN: ${{ secrets.HINDSIGHT_PRIVATE_REPO_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -60,7 +60,7 @@ jobs:
         id: private
         if: env.HAS_PRIVATE_TOKEN == 'true'
         continue-on-error: true
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: JohnnyM77/Reporting-Agent-private
           token: ${{ secrets.HINDSIGHT_PRIVATE_REPO_TOKEN }}

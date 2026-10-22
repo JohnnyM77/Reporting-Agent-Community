@@ -61,7 +61,7 @@ jobs:
       TARGET_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # On workflow_run, github.sha is the default branch's tip as of when
           # the event fired, which can predate the agent's own dashboard commit
@@ -70,7 +70,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -149,4 +149,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

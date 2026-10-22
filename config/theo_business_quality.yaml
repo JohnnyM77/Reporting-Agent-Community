@@ -1,0 +1,165 @@
+# Theo — Business-Quality Diligence
+# =============================================================================
+# The companion to the decision-quality module. Annie Duke
+# (config/theo_decision_quality.yaml) asks "am I making this bet WELL?" — the
+# calibration, the premortem, the sizing. This file asks the other half: "is the
+# thing I'm betting on actually any GOOD?" — the moat, the money, the competition.
+#
+# A thesis can be a beautifully-calibrated bet on a business nobody understood.
+# These are the legs the pillars have to stand on so that doesn't happen.
+#
+# The rule that keeps this from becoming a 40-question form: the PILLARS are
+# where these legs live. Theo does not ask a fresh battery — it reads the thesis
+# against this rubric and asks ONE question only where a leg is missing or waved
+# at. Target two or three extra questions on top of the Annie Duke set, never a
+# checklist read aloud. The frameworks Harry already uses are shared here, not
+# duplicated: 7 Powers (hindsight/frameworks/seven_powers.yaml) and Munger's
+# tendencies (hindsight/frameworks/munger_tendencies.yaml).
+# =============================================================================
+
+meta:
+  module: business_quality
+  companion_to: config/theo_decision_quality.yaml
+  owner: JM
+  status: active
+  last_updated: 2026-10-19
+
+core_principle: >-
+  Decide the business is good on evidence, not on the story. Every leg below is
+  a claim that must be falsifiable: not "it has a moat" but "it has THIS moat,
+  here is the fingerprint in the numbers, and here is what I would see if it were
+  eroding". A leg without an erosion test is marketing, and it belongs in a
+  pillar's kill_condition or it does not belong in the thesis.
+
+# -----------------------------------------------------------------------------
+# The question that prompted this file: can we PROVE a moat?
+# -----------------------------------------------------------------------------
+can_you_prove_a_moat:
+  honest_answer: >-
+    No — a moat is a claim about the future and the future is not provable. But
+    you can do far better than vibes: name the SOURCE of the advantage, point to
+    the fingerprint it leaves in the numbers, and state the observable that would
+    tell you it is narrowing. "Proven" becomes "evidenced, and falsifiable".
+  name_the_source: >-
+    Which of the 7 Powers is it (see hindsight/frameworks/seven_powers.yaml):
+    Scale Economies, Network Economies, Counter-Positioning, Switching Costs,
+    Branding, Cornered Resource, or Process Power? If you cannot name one, you
+    may have a good business with no moat — say that plainly; it changes the
+    hold horizon and the price you should pay.
+  the_fingerprint: >-
+    A real moat shows up as sustained high returns on capital that do NOT get
+    competed away: ROIC/ROCE comfortably above the cost of capital for years,
+    pricing power (price rises that stick without volume loss), stable-or-rising
+    gross margin, low customer churn / high retention, share held or gained
+    against capable competitors. One good year is not a moat; a decade is
+    evidence.
+  the_erosion_test: >-
+    The falsifiable half. "I would know this moat is narrowing if ___" —
+    gross margin falls two years running, a competitor matches the product at a
+    lower price and keeps the customers, churn rises through a stated level,
+    the reinvestment stops earning its historic return. That sentence becomes a
+    pillar kill_condition.
+
+# -----------------------------------------------------------------------------
+# The universal legs. Every long-term thesis should stand on these; ask where a
+# pillar does not already cover one.
+# -----------------------------------------------------------------------------
+legs:
+  - id: moat
+    name: The moat, and why it persists
+    ask: >-
+      What stops a well-funded competitor from taking this, and how do you SEE
+      it in the numbers? Name the Power, the fingerprint, and the erosion test.
+    into: a pillar whose kill_condition is the erosion test.
+
+  - id: financial_durability
+    name: Can the business fund itself and survive a bad year?
+    ask: >-
+      Three things, briefly: does profit turn into cash (cash conversion, not
+      just accounting earnings)? What do incremental dollars earn (ROIC vs cost
+      of capital)? And could it survive its worst plausible year without a rescue
+      raise — net debt / EBITDA, interest cover, debt maturities, covenant
+      headroom? A moat on a fragile balance sheet is a moat you may not own long
+      enough to benefit from.
+    into: a pillar, and the balance-sheet floor as a kill_condition where leverage is the risk.
+
+  - id: competition
+    name: Who takes this from you, and what is the industry structure?
+    ask: >-
+      Name the real competitor and their most credible response — price, a
+      cheaper substitute, a platform bundling it to zero, a regulator. Is the
+      industry a rational oligopoly or a knife-fight? The strongest bear case
+      usually lives here, not in the valuation.
+    into: the pre_mortem / alternative_considered, and a pillar if the threat is live.
+
+  - id: management_and_capital
+    name: Where does the money go, and do you trust the hands?
+    ask: >-
+      Keep it short — Harry carries the forensic management read. Just: is
+      capital allocation sane (reinvestment that earns its return, buybacks only
+      when cheap, acquisitions that are not empire-building), is the incentive
+      aligned (insider ownership, sensible remuneration), and is the reporting
+      honest? Skip if the archetype is INDEX_DIVERSIFIER.
+    into: valuation_note / a pillar; defer the deep read to Harry.
+
+# -----------------------------------------------------------------------------
+# One or two archetype-specific must-answers. Pick the row that matches.
+# -----------------------------------------------------------------------------
+archetype_specific:
+  COMPOUNDING_MACHINE: >-
+    Reinvestment runway: how many years can it redeploy capital at these returns,
+    and what is the TAM it is reinvesting into? A compounder that runs out of
+    runway is just an expensive mature business.
+  STRUCTURAL_WINNER: >-
+    Is the tailwind real and is THIS company the way to own it, or just a
+    passenger? Name the share-of-a-growing-pie evidence, not the pie.
+  CYCLICAL_TRADE: >-
+    Mid-cycle economics, not peak: what does it earn through the cycle, where are
+    we in the cycle now, and — the one that kills cyclicals — does the balance
+    sheet survive the trough? Cost-curve position: is it a low-cost producer?
+  TURNAROUND: >-
+    What SPECIFICALLY has to change, is there evidence it is actually turning
+    (orders, margin, management change with a track record) rather than promised,
+    and what is the cash runway to get there before a raise is forced? Turnarounds
+    seldom turn — demand evidence over narrative.
+  SPECULATIVE_PREPROFIT: >-
+    Path to profit and the cash runway to reach it: quarters of funding at the
+    current burn (the Appendix-4C Item-8 number), the next funding event, and the
+    one milestone that de-risks the whole thing. Dilution is the base case here.
+  MELTING_ICE_CUBE: >-
+    How fast is it melting, and does the cash it throws off on the way down more
+    than pay for the price? This is a runoff maths question, not a growth one —
+    is the melt already in the price?
+  VALUE_TRAP: >-
+    Why is it cheap, and what is the catalyst that closes the gap — or is cheap
+    just the correct price for a declining business? Name the catalyst and its
+    date, or admit there is not one.
+  TROPHY_ASSET: >-
+    Owned for a reason that is not return — say so honestly, and still write a
+    kill_condition (what would make even a trophy not worth holding).
+  INDEX_DIVERSIFIER: >-
+    No single-business diligence applies — it is a basket. The only questions are
+    cost (fee), what it is exposure to, and whether it still earns its slot vs a
+    specific idea.
+
+# -----------------------------------------------------------------------------
+# How to use it without drowning the interview.
+# -----------------------------------------------------------------------------
+how_to_use:
+  - Read the draft pillars first. Each leg a pillar already covers needs no question.
+  - Ask only for the missing legs, one question each, and fold the answer into a
+    pillar with a kill_condition — never leave it as loose prose.
+  - At most two or three questions beyond the Annie Duke six. If more than that is
+    missing, the thesis is not ready, and that is itself the finding — say so.
+  - "At the annual refresh (annual_refresh in theo_decision_quality.yaml), the moat
+    leg gets one standing question — is it widening or narrowing this year, on the
+    fingerprint numbers?"
+
+the_test: >-
+  A thesis is thorough when: every pillar names the leg it stands on and carries
+  a kill_condition; the moat is a named Power with a fingerprint and an erosion
+  test, or is honestly declared absent; the balance sheet is shown to survive a
+  bad year, or leverage is a pillar with a floor; the bear case names the real
+  competitor's real response; and the archetype's own must-answer is covered. If
+  all that holds, the decision-quality ticket is sitting on a business you
+  actually understand — which is the whole point.

@@ -165,11 +165,12 @@ _QUARTERLY_4C_CASHFLOW_LABELS = [
 
 # Acquisition quick-take rows — kept in step with agent.ACQUISITION_QUICK_TAKE_ROWS.
 _ACQUISITION_QUICK_TAKE_LABELS = [
-    ("target",        "Target"),
-    ("consideration", "Consideration"),
-    ("multiple",      "Multiple"),
-    ("funding",       "Funding"),
-    ("strategic_fit", "Strategic fit"),
+    ("target",              "Target"),
+    ("consideration",       "Consideration"),
+    ("multiple",            "Multiple"),
+    ("funding",             "Funding"),
+    ("capital_raise_check", "Capital raise check"),
+    ("strategic_fit",       "Strategic fit"),
 ]
 
 

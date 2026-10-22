@@ -50,6 +50,6 @@ def test_every_market_data_workflow_gets_the_eodhd_token():
     # The workflows whose agents read prices or fundamentals.
     for name in ("wally_watchlists", "sunday_sally_weekly_review", "sally_wedge",
                  "captain_hindsight", "esther", "results_pack_agent", "eodhd_check",
-                 "daily"):
+                 "daily", "mike"):
         text = (REPO / ".github" / "workflows" / f"{name}.yml").read_text(encoding="utf-8")
         assert "EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}" in text, name

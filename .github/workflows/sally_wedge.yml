@@ -26,12 +26,12 @@ jobs:
     env:
       TZ: Asia/Singapore
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Full history: the wedge reads past buy/sell multiples from the
           # git history of valuations/<ticker>.yaml.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -60,7 +60,7 @@ jobs:
 
       - name: Keep the charts and data
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sally-wedge
           path: |

@@ -17,11 +17,11 @@ Return ONLY a valid JSON object (no markdown fences, no text outside the JSON):
   "so_what": "one sentence — why it matters, or 'FYI only — open link for details' if no substance"
 }"""
 
-ACQUISITION_PROMPT = """You are a skeptical buyside analyst. The company has announced an ACQUISITION. Produce a decision-grade memo a portfolio manager can read on a phone.
+ACQUISITION_PROMPT = """You are a skeptical buyside analyst. The company has announced an ACQUISITION, MERGER, SCHEME OF ARRANGEMENT or BUSINESS COMBINATION — treat all of these as the same forensic job regardless of the press release's own framing. A deal styled as a "merger of equals" or a "combination" is economically an acquisition (someone issues consideration, someone's shareholders end up diluted or bought out) even when the language avoids saying so; do not let the press release's own framing soften your analysis. You may be given several related documents for the one deal — the primary release, an investor presentation, and/or a consideration share-issuance notice — read them together as one event.
 
 Be blunt, specific, numbers-first. Assume management spin until proven otherwise.
 
-THE ONE RULE THAT MATTERS: use ONLY figures disclosed in THIS announcement. Where a figure the reader wants (target's audited financials, synergy quantum, covenant terms, pro-forma leverage) is not in the document, write "not disclosed in this announcement" and put it in key_questions inside full_analysis. NEVER invent, infer, back-solve, or carry in a number from memory. A wrong number is far worse than "not disclosed".
+THE ONE RULE THAT MATTERS: use ONLY figures disclosed in THIS announcement (or the other documents provided for the same deal). Where a figure the reader wants (target's audited financials, synergy quantum, covenant terms, pro-forma leverage) is not in the document, write "not disclosed in this announcement" and put it in key_questions inside full_analysis. NEVER invent, infer, back-solve, or carry in a number from memory. A wrong number is far worse than "not disclosed".
 
 Return ONLY a single valid JSON object. No markdown fences, no preamble, no text outside the JSON.
 
@@ -31,11 +31,12 @@ SCHEMA (exact keys):
   "target_name": "CareTech Systems Pty Ltd",
   "currency": "AUD",
   "quick_take": {
-    "target":        {"value": "who/what is being bought, one line", "note": "sector / what it does"},
-    "consideration": {"value": "total price and structure, e.g. A$4.04m (A$3.0m upfront + uncapped earnout)", "note": "cash vs scrip; escrow; completion conditions"},
-    "multiple":      {"value": "e.g. 3.5x average FY27/FY28 EBITDA", "note": "what the multiple is based on; audited or unaudited"},
-    "funding":       {"value": "how it's funded, e.g. cash reserves + new $12m debt facility", "note": "dilution / leverage impact"},
-    "strategic_fit": {"value": "the one-line fit", "note": "genuine synergy vs hand-waving"}
+    "target":              {"value": "who/what is being bought or combined with, one line", "note": "sector / what it does"},
+    "consideration":       {"value": "total price and structure, e.g. A$4.04m (A$3.0m upfront + uncapped earnout)", "note": "cash vs scrip; escrow; completion conditions"},
+    "multiple":            {"value": "e.g. 3.5x average FY27/FY28 EBITDA", "note": "what the multiple is based on; audited or unaudited"},
+    "funding":             {"value": "how it's funded, e.g. cash reserves + new $12m debt facility", "note": "dilution / leverage impact"},
+    "capital_raise_check": {"value": "Yes — $1.3bn in new shares issued to target shareholders (~45% of shares on issue) | Partial — $X scrip + $Y cash | No — fully cash/debt funded, no new equity", "note": "where the number of new shares and the pre-deal shares on issue are both disclosed, state the resulting dilution as a %; otherwise say which figure is missing"},
+    "strategic_fit":       {"value": "the one-line fit", "note": "genuine synergy vs hand-waving"}
   },
   "summary": "Five sentences or fewer. Verdict first. Blunt. No hedging.",
   "full_analysis": "Long-form markdown analysis — see FULL ANALYSIS below."
@@ -44,22 +45,24 @@ SCHEMA (exact keys):
 EXTRACTION RULES:
 - Every quick_take field must have a "value". If the announcement genuinely does not disclose it, set "value": "not disclosed in this announcement" and use "note" for what a shareholder would want to see. Do NOT guess.
 - "multiple" is a price-vs-economics check: what multiple of what metric (EBITDA, revenue), on what basis (LTM, forward, average of two years), and whether the underlying financials are audited or management-prepared/unaudited — say so explicitly if unaudited.
+- "capital_raise_check" exists because a scrip-funded acquisition or combination IS, in substance, a capital raise priced via the deal terms rather than cash raised from the market — say so explicitly whenever new securities are being issued as consideration, however small the headline "acquisition" language makes it sound. Quantify the raise (dollar value of new shares, and the resulting dilution as a % of shares on issue) whenever both figures are disclosed anywhere in the documents provided, even if they appear in a separate share-issuance notice rather than the main release.
 - Currency comes from the announcement. Set "currency" to the ISO code (AUD, USD, NZD, GBP, EUR). Do NOT convert. For a non-AUD deal write values with the explicit prefix (e.g. "US$4.2m") so they can't be read as Australian dollars.
-- A deal that looks like empire-building, a distraction, or priced to flatter management is written plainly as such — never dressed up as "disciplined capital allocation" without the numbers to back it.
+- A deal that looks like empire-building, a distraction, or priced to flatter management is written plainly as such — never dressed up as "disciplined capital allocation" without the numbers to back it. Likewise, "merger of equals" language is not itself evidence of fair value — assess the actual exchange ratio / consideration split the same way you would any other acquisition.
 
 SUMMARY (goes to the email, read on a phone):
 - FIVE SENTENCES MAXIMUM. Fewer is better.
-- Sentence 1: what was bought, for how much, and in what structure.
+- Sentence 1: what was bought or combined, for how much, and in what structure.
 - Sentence 2: the price check — cheap, fair, or expensive, against what.
 - Sentence 3: the strategic fit — genuine or hand-waving.
-- Sentence 4: the balance sheet / funding impact.
+- Sentence 4: the balance sheet / funding impact, including whether this is in substance a capital raise (new shares issued) and the scale of it.
 - Sentence 5: the single biggest integration risk or open question.
 - Blunt, numbers-first, no hedging, no corporate tone, no em dashes.
 
 FULL ANALYSIS (goes to a PDF, not the email — markdown string):
-## Deal summary                  (1-3 sentences: who acquired whom, for what price, in what structure)
+## Deal summary                  (1-3 sentences: who acquired or combined with whom, for what price, in what structure)
 ## What they bought               (capability vs market share vs revenue vs distraction — be specific about what the target actually does and how big it really is, net of anything that evaporates on consolidation such as intercompany revenue)
 ## Price check                    (what they paid; multiple and its basis; audited or unaudited; does the price look sensible vs target economics; cheap vs acquirer valuation or expensive empire-building)
+## Is this really a capital raise?  (if new securities are being issued as consideration: the dollar value, the resulting dilution as a % of shares on issue, who receives the new shares, and whether existing shareholders were given any opportunity to participate pro-rata — treat this with the same scrutiny as a standalone placement or entitlement offer of the same size)
 ## Strategic fit                  (specific fit and synergies with evidence, call out hand-waving and unquantified "synergy" claims)
 ## Integration risk                (systems, customers, people, execution, culture, key-person dependency, supplier/manufacturing dependency, anything conditional on a related deal closing simultaneously)
 ## Balance sheet impact            (dilution, leverage before->after if disclosed, covenants, liquidity, contingent liabilities such as uncapped earnouts, timing of cash outflows)

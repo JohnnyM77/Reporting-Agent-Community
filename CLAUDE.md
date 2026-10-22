@@ -204,6 +204,15 @@ real digest down. An ad-hoc query must never cost that night's portfolio digest.
 This matches the log line manual mode always claimed ("one-off, not saved to
 state") but the code previously contradicted.
 
+**Same-day reruns add to the dashboard, never replace it.** On 2026-10-19
+the first run's MSV card was wiped from the site by two manual reruns: their
+items were already in seen_state, so each wrote a "silence" `bob.json` over
+the real digest. `_emit_bob_dashboard_json` now merges into an existing
+`bob.json` whose `last_run` is today (SGT): one copy per announcement (keyed on
+URL), this run's copy wins within a tier, an item keeps the highest tier any
+run gave it, and `silence` is true only when the merged day is empty. A new
+day starts clean. Pinned in `tests/test_bob_dashboard_accumulate.py`.
+
 ### Results detection is pattern-based, not a phrase list
 `looks_like_results_title` gates the entire results path: no match, no
 `deep_results_analysis`, no card, no PDF. It used to be a list of literal
@@ -304,6 +313,75 @@ either: an acquisition announcement IS the acquisition, not a pre-notice
 that one is coming, so the notification-only failure mode that motivated
 the gate on trading updates and 4C doesn't apply here.
 
+### A "combination" is an acquisition, and the deal's documents are bundled (V3.3)
+NHC announced a ~$1.3bn scrip "combination" with Malabar, its existing coal
+JV partner, on 2026-10-18, across three documents — the primary release
+("New Hope and Malabar to combine"), an investor presentation, and a
+"Proposed issue of securities - NHC" notice for the consideration shares —
+and Bob missed the economic substance of all three:
+
+- `classify_from_title_only`'s ACQUISITION bucket only matched "acquisition"
+  / "acquire" / "merger" / "scheme" / "takeover" / "transaction". "Combine" /
+  "combination" is the same forensic job under different press-release
+  framing — a "merger of equals" still has someone issuing consideration and
+  someone's shareholders ending up diluted — so it's now in the same bucket.
+  The primary release fell straight to FYI with zero analysis; the
+  presentation matched `is_price_sensitive_title` on "presentation" alone
+  and got the generic, context-free "price-sensitive headline" MATERIAL
+  two-liner.
+- `classify_from_title_only`'s CAPITAL_OR_DEBT_RAISE bucket had "issue of
+  shares" but not the generic ASX term "issue of securities" (or "issue of
+  new shares"), so the $1.3bn consideration-share notice was FYI-only too —
+  despite being, in isolation, one of the largest capital raises of the
+  year for this portfolio.
+
+**Policy on magnitude** (the question this raised: at what size should a
+share issuance "pique your interest"?): Bob doesn't gate on dollar size
+anywhere else — once CAPITAL_OR_DEBT_RAISE/ACQUISITION classifies a title at
+all, it always gets the full card, and the card states the actual dollar
+amount and dilution so the size speaks for itself rather than being
+pre-filtered by a guessed threshold. The fix here is deliberately a coverage
+fix (catching title phrasing the net previously missed entirely), not a size
+threshold — a routine small DRP top-up or option exercise uses different,
+more specific ASX notice types ("Notification of buy-back", "Change of
+Director's Interest Notice") that were never going to match either bucket.
+
+**The deal's documents are bundled, not fragmented.** A real multi-document
+deal (release + presentation + share-issuance notice, all filed the same
+day) is one economic event, and three separate context-free cards is worse
+than one coherent one. `likely_acquisition_bundle_items` mirrors
+`likely_results_bundle_items`'s role for the RESULTS_HY_FY path: it requires
+**exactly one** ACQUISITION-classified trigger item for the ticker that day
+— zero means nothing to bundle, and more than one (AHC's two distinct,
+unrelated acquisitions the same morning on 2026-10-16) means bundling would
+blur two different deals into one card, so each is left to the per-item loop
+exactly as it already was. A title that matches a side pattern itself
+(`_ACQUISITION_BUNDLE_SIDE_PATTERNS`: presentation, investor call/briefing,
+scheme booklet, issue of securities/shares, placement, entitlement) is never
+counted as a trigger even if it also matches the ACQUISITION keywords —
+without this, "Presentation on New Hope and Malabar to Combine" counts as a
+*second* trigger (it contains "combine" too) and the bundle wrongly thinks
+there are two separate deals. Once bundled, every matching same-day
+document — PDF and all — is sent to `deep_acquisition_memo` as native PDF
+attachments in one call (`llm_chat_with_pdfs`, same multi-attachment pattern
+`deep_results_analysis` uses for report+deck), and every bundled URL is
+added to `handled_urls` so the per-item loop never re-processes them.
+
+**One card, both characterisations.** Rather than building a second,
+redundant CAPITAL_OR_DEBT_RAISE card describing the same economic event from
+the other angle, `ACQUISITION_QUICK_TAKE_ROWS` gained a sixth row,
+`capital_raise_check`: the model states plainly whether new securities are
+being issued as consideration and, whenever both the dollar value and the
+pre-deal shares on issue are disclosed anywhere across the bundled
+documents, the resulting dilution as a %. `ACQUISITION_PROMPT` is explicit
+that a scrip-funded acquisition or combination IS, in substance, a capital
+raise priced via the deal terms rather than cash raised from the market, and
+gets a dedicated `full_analysis` section ("Is this really a capital raise?")
+assessed with the same scrutiny as a standalone placement or entitlement
+offer of the same size — this is the "nice structured output that says both"
+the request asked for, generalised to any company's scrip-funded deal, not
+special-cased to NHC.
+
 ### Trading updates and 4C/5B quarterly reports render as a card, not a blob
 (V3.1) The same "card, not a blob" rework as capital raises, now applied to
 the two other high-frequency announcement types that used to dump a wall of
@@ -388,6 +466,20 @@ it. Email clients strip `<style>` blocks and mishandle flexbox/grid; a
 two-column `<table>` (label `<td>` + value `<td>`) is the only reliable way to
 get label-left / value-right rows. Change values are coloured with an inline
 `style="color:…"` span — green up, red down, muted grey for `n/a` / `n/m`.
+
+**Every email is made Outlook-safe on the way out (2026-10-21).** Desktop
+Outlook only paints a `<div>` background behind each line of text, so a dark
+email read as black bars on white (Bob, on the PC; the iPhone was fine).
+`shared/email_service.build_message` passes every `body_html` through
+`shared/email_html.outlook_safe`, which turns each block `<div>` with a
+background into a one-cell table (`bgcolor` + inline `background-color`),
+keeping margins/width on a plain wrapper `<div>`, copying the text styles
+the cell would have inherited (quirks mode does not inherit into tables),
+and adding an inner `display:flow-root` div so a last `<p>`'s margin is not
+dropped. Inline badges are untouched. Checked by screenshot on every
+agent's email captured from the test suite: identical heights on phone,
+solid on desktop. Agents can keep building divs; never bypass
+`build_message`. Tests: `tests/test_email_outlook_safe.py`.
 
 Digest blocks may now be either a plain string (escaped, pre-wrap) or a
 `{"text": ..., "html": ...}` dict for blocks that build their own email-safe
@@ -1517,6 +1609,16 @@ in the email: never a quiet empty section.
 **Checking sources:** "Ned News Agent" -> Run workflow -> `probe_only`, or
 `python scripts/ned_probe_sources.py`.
 
+**Ned's email is table-built, like every other agent email.** It used to wrap
+each card in a `<div>` with a background. Phones painted those solid, but
+desktop Outlook only painted each line, leaving white stripes between them
+on a white page (2026-10-20). Every coloured box is now a table cell with
+`bgcolor` plus inline `background-color` (`_box` / `_gap` in
+`ned/email_builder.py`), inside one full-width dark table. Same colours and
+spacing, so the phone view is unchanged.
+`tests/test_ned_sources.py::test_email_backgrounds_live_on_table_cells_not_divs`
+fails if a `<div>` carries a background again.
+
 ## Tests: stub a dependency only if it's missing
 
 Test files that import agent code stub optional third-party modules through
@@ -1649,6 +1751,33 @@ instruction**, and the sync never touches them beyond `lists` and `active`.
 A ticker override (multiple + reason) always wins over the rules. Plain-English
 rules: `docs/VALUATION_RULES.md`.
 
+## Mike: Mikebrisy's Stock Quality framework v3.1 (`mike/`)
+
+Scores Mikebrisy's Stock Quality Assessment Framework v3.1 (Strawman,
+2026-10-20) exactly as written. Manual only (`mike.yml`, workflow_dispatch,
+lists `mikebrisy_sample` / `portfolio`); emails a Bob-style card with the full
+assessment PDF attached and uploads the PDF/JSON as an artifact. Commits
+nothing, publishes nothing. Detail: `mike/README.md`. (Replaced Quentin,
+the earlier six-factor approximation, before it merged.)
+
+- **Exactly the framework.** Base-score tables in `mike/rubric.py` are the
+  framework's own; do not tune thresholds there. A personal variant is a new
+  profile/module, never an edit to Mike's rubric.
+- **The model proposes, code decides.** One Claude call per company
+  (`mike/evidence.py`, web search) builds the Market Position register and
+  proposes overlays; code awards a test only with evidence plus source,
+  rejects forward-looking uplift, off-list overlays and reused evidence, and
+  caps overlays at +/-0.5 per criterion.
+- **QA/QC is a gate, not decoration.** `mike/qaqc.py` recomputes the key
+  ratios from raw EODHD JSON by a separate code path, runs every 8.5 check
+  and the 8.7 certification; anything failing leaves the company DRAFT with
+  the reasons on the card and in the PDF. The PDF is rendered, reopened and
+  checked per company before certification.
+- **Statutory only.** EODHD has no underlying earnings; one-offs stay in and
+  are listed for review. Banks/insurers stay DRAFT (no sector metrics yet).
+- **Burn mode** on Balance Sheet means the business burns cash (EBITDA <= 0,
+  or a loss with negative CFO/FCF), not a statutory impairment loss (CSL FY26).
+
 ## EODHD data
 Before writing or changing any code that calls the EODHD API, read .claude/skills/eodhd-api/SKILL.md and the relevant endpoint doc in .claude/skills/eodhd-api/references/endpoints/. Use the exact endpoint paths, parameter names, and response field names documented there. Never guess an endpoint or field name. ASX tickers use the .AU suffix.
 
@@ -1711,3 +1840,100 @@ earlier source is treated as stale and rebuilt from EODHD.
 runs `scripts/eodhd_check.py` and puts a table of every figure the agents
 will use (and, with `detail`, the EPS working year by year) on the run's
 Summary page. Locally: `python scripts/eodhd_check.py PWH --detail`.
+
+## Theo — thesis accountability, and the decision-quality layer
+
+Theo is the thesis manager. It is a CLI, not a bot on a cron: `python -m
+theo.cli <cmd>` — `new` scaffolds `theses/<TICKER>.md`, `check` validates
+(every pillar needs a `kill_condition` or it fails), `show` renders a slide,
+`list`/`drift`/`irr`/`gaps`/`signals` report, `dashboard` emits
+`docs/data/theo.json`, `publish` builds `site/`. Theses live in `theses/*.md`
+as YAML frontmatter + prose; a later view is a dated entry in the `reviews:`
+block, never a rewrite of the entry. Numbers are never hand-typed into a
+thesis — they come from the ledger (`data/decisions.json`) at render time.
+
+### Run the decision-quality interview before finalising any thesis
+
+Building or reviewing a thesis is not just filling fields — it is a "Thinking
+in Bets" (Annie Duke) interview, so Future JM can tell a GOOD DECISION from a
+GOOD OUTCOME. Before writing or updating a thesis, **read all three**:
+
+- `config/theo_decision_quality.yaml` — the behaviour: the six questions, the
+  interview posture (conversational, challenge overconfidence, reuse what the
+  thesis already answers, ~5-10 min, never a 40-question form), the compact
+  **Decision Ticket**, the information-known-then-vs-learned-later rule, the
+  three-part review (outcome / decision quality / learning) with the
+  anti-hindsight phrasings, and the skill-vs-luck taxonomy. It also holds the
+  `hold_review` and `annual_refresh` modes.
+- `config/theo_business_quality.yaml` — the other half: is the *business* worth
+  betting on, not just is the bet well made. The moat (named as one of the 7
+  Powers, with a numeric fingerprint and a falsifiable erosion test — you cannot
+  *prove* a moat, you evidence it), financial durability (cash conversion, ROIC,
+  can it survive a bad year), the real competitor's real response, and one or two
+  archetype-specific must-answers (turnaround: evidence it is actually turning +
+  cash runway; cyclical: mid-cycle economics + survive the trough; pre-profit:
+  path to profit + quarters of funding). These legs live in the **pillars** —
+  ask one question only where a pillar does not already cover a leg, two or three
+  extra at most, never a fresh battery.
+- `hindsight/frameworks/annie_duke_bets.yaml` — the specific capture questions
+  and the `capture_as` field names (bet_statement, conviction_pct_initial,
+  cases_documented, premortem_statement, key_unknown, crowd_check,
+  emotion_check_note, sizing_check, sell_triggers, thesis_horizon_years,
+  rejected_alternative). Harry reads the same library (Munger, 7 Powers).
+
+Then **interview JM one question at a time**, challenge rather than agree, and
+close with a **timestamped Decision Ticket** plus an independent view of
+whether it is a good bet at the current price. The iron rule: judge the
+decision on the information available WHEN IT WAS MADE; never "result" it on
+the share price that followed. A losing position can be a good decision; a
+winning one can be a bad decision that got lucky.
+
+### Event-driven / takeover trades use the same module
+
+A merger-arb or scheme trade is assessed with the same interview, re-pointed
+at the deal: completion probability, transaction and regulatory risk, delay,
+the downside if the deal breaks (the undisturbed price, not zero), expected
+return and its annualised rate, position sizing against that asymmetry, and
+the conditions that would make JM walk. Verify the deal terms (price,
+structure, board recommendation, conditions, timetable, break fee) from
+primary sources — the ASX scheme booklet / announcement — and keep verified
+facts, assumptions and subjective probabilities clearly separated.
+
+### Hold-through-sell and the annual refresh
+
+Two more interview modes, both documented in `config/theo_decision_quality.yaml`
+(`hold_review`, `annual_refresh`). Neither is mandatory; both leave a record.
+
+**Hold-through-sell.** When Sally, Harry, or Theo's own drift says sell/trim and
+you are keeping the holding, that decision is the one thing that otherwise never
+gets written down. The plumbing already existed (`theo/signals.py`: a signal
+becomes an open question, answered by a dated `review` with a `trigger` and a
+`decision` — DECLINED is a fine answer, three DECLINEDs with nothing TIGHTENED is
+an ALERT). The new piece is the *interview* that makes that review a good one —
+four scenarios in the config (valuation flag / letting winners run / thesis
+broken / repeat refusal), each ending in a review entry and, where it declines,
+either a tightened kill condition or an explicit "still no trigger, and why".
+
+**Annual refresh.** Once a year, after a company's full-year result, re-test the
+thesis against the new numbers. It fires two ways, either enough:
+
+- **Bob picks it up.** `signals.from_bob_annual` reads `docs/data/bob.json` for a
+  `type: results` item with `analysis.period_type == "full_year"` and opens an
+  `ANNUAL_REPORT` question the day it lands — Theo reading Bob's output, the same
+  read-only pattern as Sally/Harry. **Bob is not modified.** Answered by a dated
+  review with `trigger: ANNUAL_REPORT`.
+- **The schedule.** `theo/review_cycle.py` marks a thesis due once the result is
+  expected (~2 months after the balance date) and no review has been written
+  since — so the prompt survives after Bob's digest rolls on. Per company,
+  because reporting dates are: `reporting_calendar.fy_end_month` in the thesis
+  frontmatter (6 = Australian FY, 12 = calendar year; absent → June assumed, and
+  the schedule says "assumed"). This schedule is deliberately **not** folded into
+  the drift verdict — it is a calm maintenance list (`theo reviews-due`, and the
+  dashboard "Annual refresh" block), not a WATCH-flipping finding.
+
+Both surface on the dashboard Theo card: an "Annual refresh" line (due first) and
+a "Held when told to sell — on the record" table. Structural facts only (ticker,
+date, trigger, decision, reporting basis); the reasoning stays on the slide at
+`/theo/`, so nothing on the public dashboard can size the book. The front-end for
+all of this is the Theo Thesis Builder artifact (private, on JM's account), which
+has a mode selector: New thesis / Hold-through-sell / Annual refresh.
